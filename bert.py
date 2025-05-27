@@ -41,13 +41,25 @@ class BertSelfAttention(nn.Module):
         # and get back a score matrix S of [bs, num_attention_heads, seq_len, seq_len]
         # S[*, i, j, k] represents the (unnormalized) attention score between the j-th
         # and k-th token, given by i-th attention head before normalizing the scores,
-        # use the attention mask to mask out the padding token scores.
+        # use the attention mask to mask out the padding token scores
+        
 
         # Note again: in the attention_mask non-padding tokens are marked with 0 and
         # adding tokens with a large negative number.
+        
+        # get scores
+        S = torch.matmul(query, key.transpose(-2, -1))
+        
+        # normalize scores (by sqrt(dk))
+        S /= torch.sqrt(torch.tensor(self.attention_head_size, dtype='f4'))
+        S = S + attention_mask
+        S = F.softmax(S, dim=-1)
+
+        rtrn = torch.matmul(S, value)
 
         ### TODO
-        raise NotImplementedError
+        return rtrn
+        # raise NotImplementedError
         # Normalize the scores.
         # Multiply the attention scores to the value and get back V'.
         # Next, we need to concat multi-heads and recover the original shape
