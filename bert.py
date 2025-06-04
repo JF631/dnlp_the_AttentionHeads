@@ -175,23 +175,31 @@ class BertModel(BertPreTrainedModel):
         # Get word embedding from self.word_embedding into input_embeds.
         inputs_embeds = None
         ### TODO
-        raise NotImplementedError
+        # raise NotImplementedError
+        inputs_embeds = self.word_embedding(input_ids) # shape: [batch_size, seq_length, hidden_size]
 
         # Get position index and position embedding from self.pos_embedding into pos_embeds.
-        pos_ids = self.position_ids[:, :seq_length]
+        pos_ids = self.position_ids[:, :seq_length] # shape: [1, seq_length]
+        pos_ids = pos_ids.expand(input_shape)       # shape: [batch_size, seq_length]
 
         pos_embeds = None
         ### TODO
-        raise NotImplementedError
+        # raise NotImplementedError
+        pos_embeds = self.pos_embedding(pos_ids)    # shape: [batch_size, seq_length, hidden_size]
+
         # Get token type ids, since we are not considering token type,
         # this is just a placeholder.
         tk_type_ids = torch.zeros(input_shape, dtype=torch.long, device=input_ids.device)
         tk_type_embeds = self.tk_type_embedding(tk_type_ids)
 
         ### TODO
-        raise NotImplementedError
+        # raise NotImplementedError
         # Add three embeddings together; then apply embed_layer_norm and dropout and
         # return the hidden states.
+        embeddings = inputs_embeds + pos_embeds + tk_type_embeds    # all three tensors have same shape: [batch_size, seq_length, hidden_size]
+        embeddings = self.embed_layer_norm(embeddings)
+        embeddings = self.embed_dropout(embeddings)
+        return embeddings
 
     def encode(self, hidden_states, attention_mask):
         """
