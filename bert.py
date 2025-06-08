@@ -109,8 +109,21 @@ class BertLayer(nn.Module):
         dropout: the dropout to be applied
         ln_layer: the layer norm to be applied
         """
-        ### TODO
-        raise NotImplementedError
+        
+        # First, apply tranformation to output
+        transformed_output = dense_layer(output)
+
+        # Apply dropout to the transformed output (from hint)
+        dropped_output = dropout(transformed_output)
+
+        # Add the original input (residual connection)
+        residual = input + dropped_output
+
+        # Normalize the result using layer normalization -> final result
+        normalized_output = ln_layer(residual)      
+
+        return normalized_output
+    
         # Hint: Remember that BERT applies dropout to the output of each sub-layer,
         # before it is added to the sub-layer input and normalized.
 
