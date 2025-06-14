@@ -51,7 +51,7 @@ class BertSelfAttention(nn.Module):
         S = torch.matmul(query, key.transpose(-2, -1))
         
         # normalize scores (by sqrt(dk))
-        S /= torch.sqrt(torch.tensor(self.attention_head_size, dtype='f4'))
+        S /= torch.sqrt(torch.tensor(self.attention_head_size, dtype=torch.float32))
         S = S + attention_mask
         S = F.softmax(S, dim=-1)
 
@@ -141,7 +141,25 @@ class BertLayer(nn.Module):
         3. a feed forward layer
         4. a add-norm that takes the input and output of the feed forward layer
         """
-        ### TODO
+        # Self attention
+        attention_out = self.self_attention(hidden_states, attention_mask)
+        attention_out = attention_out.transpose(1, 2).contiguous().view(hidden_states.size(0), hidden_states.size(1), -1)
+        attention_out = self.add_norm(hidden_states, attention_out,
+                                         self.attention_dense,
+                                         self.attention_dropout,
+                                         self.attention_layer_norm) 
+
+        #Feed forward
+        interm_out = self.interm_dense(attention_out)
+        interm_out = self.interm_af(interm_out)
+
+        #add norm for the output
+        layer_out = self.add_norm(attention_out, interm_out,
+                                  self.out_dense,
+                                  self.out_dropout,
+                                  self.out_layer_norm)
+
+        return layer_out
         raise NotImplementedError
 
 
