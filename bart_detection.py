@@ -16,7 +16,7 @@ TQDM_DISABLE = False
 
 
 class BartWithClassifier(nn.Module):
-    def __init__(self, num_labels=7):
+    def __init__(self, num_labels=32):
         super(BartWithClassifier, self).__init__()
 
         self.bart = BartModel.from_pretrained("facebook/bart-large", local_files_only=True)
@@ -81,7 +81,7 @@ def transform_data(dataset: pd.DataFrame, max_length=512):
     else:
         dataset = TensorDataset(input_ids, attention_mask)        
 
-    return DataLoader(dataset, batch_size=64, shuffle=True, num_workers=4)
+    return DataLoader(dataset, batch_size=64, shuffle=True, num_workers=0)
 
 
 def train_model(model, train_data, dev_data, device):
@@ -95,6 +95,36 @@ def train_model(model, train_data, dev_data, device):
 
     Return the trained model.
     """
+    model = model.to(device)
+    optimizer = AdamW(model.parameters(), lr=3e-5)
+    loss_fn = nn.BCEWithLogitsLoss()
+    loss_fn = nn.BCELoss()
+
+    n_epochs = 10
+    epoch_losses = np.empty((n_epochs,))
+    for epoch in tqdm(range(n_epochs), desc="Running training loop"):
+        model.train()
+        losses = []
+        print(f"inited {device}")
+        for batch in train_data:
+            if len(batch) == 3:
+                in_ids, attention_mask, labels = [b.to(device) for b in batch]
+            if len(batch) == 2:
+                in_ids, attention_mask = [b.to(device) for b in batch]
+            print("batch loaded")
+            probs = model(input_ids=in_ids, attention_mask=attention_mask)
+            print("model output ready")
+            loss = loss_fn(probs, labels.float())
+            print("loss available")
+            print(loss)
+            loss.backward()
+            print("backward pass...")
+            optimizer.step()
+
+            losses.append(loss)
+        epoch_losses[epoch] = np.mean(losses)
+        losses.clear()
+    return losses
     ### TODO
     raise NotImplementedError
 
