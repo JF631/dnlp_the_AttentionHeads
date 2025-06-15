@@ -37,7 +37,7 @@ class BartWithClassifier(nn.Module):
         return probabilities
 
 
-def transform_data(dataset, max_length=512):
+def transform_data(dataset: pd.DataFrame, max_length=512):
     """
     dataset: pd.DataFrame
 
@@ -55,7 +55,33 @@ def transform_data(dataset, max_length=512):
     Return a DataLoader with the TensorDataset. You can choose a batch size of your
     choice.
     """
-    raise NotImplementedError
+    # raise NotImplementedError
+    dataset = dataset.copy()
+    col_keys = list(dataset.columns)
+    tokenizer = AutoTokenizer.from_pretrained("facebook/bart-base")
+
+    sentences1 = dataset['sentence1'].astype('str').tolist()
+    sentences2 = dataset['sentence2'].astype('str').tolist()
+
+    inputs = tokenizer(sentences1, sentences2,
+                       padding=True,
+                       truncation=True,
+                       max_length = max_length,
+                       return_tensors='pt') #pt = pytorch
+
+    input_ids = inputs['input_ids']
+    attention_mask = inputs['attention_mask']
+    if "paraphrase_type_ids" in col_keys:
+        dataset['paraphrase_type_ids'] = dataset['paraphrase_type_ids'].apply(eval)
+        binarized_labels = np.zeros((len(sentences1), 32), dtype='i4')
+        for i, indices in enumerate(dataset['paraphrase_type_ids']):
+            binarized_labels[i, indices] = 1
+        binarized_labels = torch.tensor(binarized_labels, dtype=torch.long)
+        dataset = TensorDataset(input_ids, attention_mask, binarized_labels)
+    else:
+        dataset = TensorDataset(input_ids, attention_mask)        
+
+    return DataLoader(dataset, batch_size=64, shuffle=True, num_workers=4)
 
 
 def train_model(model, train_data, dev_data, device):
@@ -160,13 +186,18 @@ def finetune_paraphrase_detection(args):
     device = torch.device("cuda") if args.use_gpu else torch.device("cpu")
     model.to(device)
 
-    train_dataset = pd.read_csv("data/etpc-paraphrase-train.csv", sep="\t")
-    test_dataset = pd.read_csv("data/etpc-paraphrase-detection-test-student.csv", sep="\t")
+    train_dataset = pd.read_csv("data/etpc-paraphrase-train.csv", sep=",")
+    test_dataset = pd.read_csv("data/etpc-paraphrase-detection-test-student.csv", sep=",")
 
-    # TODO You might do a split of the train data into train/validation set here
-    # (or in the csv files directly)
-    train_data = transform_data(train_dataset)
+    # TODO DONE You might do a split of the train data into train/validation set here
+    # (or in the csv files directly) 
+    train_dataset = train_dataset.sample(frac=1, random_state=args.seed).reset_index(drop=True)
+    split_idx = int(0.9 * len(train_dataset))
+    train_split = train_dataset[:split_idx]
+    validation_split = train_dataset[split_idx:]
+    train_data = transform_data(train_split)
     test_data = transform_data(test_dataset)
+    dev_data = transform_data(validation_split)
 
     print(f"Loaded {len(train_dataset)} training samples.")
 
