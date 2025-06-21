@@ -78,8 +78,8 @@ class MultitaskBERT(nn.Module):
         # Here, you can start by just returning the embeddings straight from BERT.
         # When thinking of improvements, you can later try modifying this
         # (e.g., by adding other layers).
-        ### TODO
-        raise NotImplementedError
+        bert_output = self.bert(input_ids, attention_mask)
+        return bert_output['pooler_output']
 
     def predict_sentiment(self, input_ids, attention_mask):
         """
