@@ -64,8 +64,11 @@ class MultitaskBERT(nn.Module):
                 param.requires_grad = False
             elif config.option == "finetune":
                 param.requires_grad = True
-        ### TODO
-        raise NotImplementedError
+
+        self.dropout = nn.Dropout(config.hidden_dropout_prob)
+
+        # Input is 2 * 768 (two sentance embeddings), output is 1 since it is single 0/1 (yes/no)
+        self.paraphrase_classifier = nn.Linear(2 * BERT_HIDDEN_SIZE, 1)
 
     def forward(self, input_ids, attention_mask):
         """Takes a batch of sentences and produces embeddings for them."""
