@@ -198,6 +198,25 @@ def train_multitask(args):
     # If you are doing the paraphrase type detection with the minBERT model as well, make sure
     # to transform the the data labels into binaries (as required in the bart_detection.py script)
 
+    # QQP dataset
+    if args.task == "qqp" or args.task == "multitask":
+        quora_train_data = SentencePairDataset(quora_train_data, args)
+        quora_dev_data = SentencePairDataset(quora_dev_data, args)
+
+        quora_train_dataloader = DataLoader(
+            quora_train_data,
+            shuffle=True,
+            batch_size=args.batch_size,
+            collate_fn=quora_train_data.collate_fn
+        )
+
+        quora_dev_dataloader = DataLoader(
+            quora_dev_data,
+            shuffle=False,
+            batch_size=args.batch_size, 
+            collate_fn=quora_dev_data.collate_fn
+        )
+
     # Init model
     config = {
         "hidden_dropout_prob": args.hidden_dropout_prob,
@@ -261,8 +280,25 @@ def train_multitask(args):
 
         if args.task == "qqp" or args.task == "multitask":
             # Trains the model on the qqp dataset
-            ### TODO
-            raise NotImplementedError
+            for batch in tqdm(quora_train_dataloader, desc=f"train-{epoch+1:02}", disable=TQDM_DISABLE):
+                # Move batch to device
+                b_ids1, b_mask1,    \
+                b_ids2, b_mask2,    \
+                b_labels = (
+                    batch['token_ids_1'].to(device), batch['attention_mask_1'].to(device),
+                    batch['token_ids_2'].to(device), batch['attention_mask_2'].to(device), 
+                    batch['labels'].to(device)
+                )
+
+                optimizer.zero_grad()
+                logits = model.predict_paraphrase(b_ids1, b_mask1, b_ids2, b_mask2)
+                
+                loss = F.binary_cross_entropy_with_logits(logits, b_labels.float().view(-1))
+                loss.backward()
+                optimizer.step()
+
+                train_loss += loss.item()
+                num_batches += 1
 
         if args.task == "etpc" or args.task == "multitask":
             # Trains the model on the etpc dataset
