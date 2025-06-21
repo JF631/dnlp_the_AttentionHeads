@@ -99,8 +99,21 @@ class MultitaskBERT(nn.Module):
         during evaluation, and handled as a logit by the appropriate loss function.
         Dataset: Quora
         """
-        ### TODO
-        raise NotImplementedError
+        # Embeddings for each sentences
+        emb1 = self.forward(input_ids_1, attention_mask_1)
+        emb2 = self.forward(input_ids_2, attention_mask_2)
+
+        # Combine embeddings
+        combined_emb = torch.cat((emb1, emb2), dim=1)
+
+        # Apply dropout
+        dropped_emb = self.dropout(combined_emb)
+
+        # Make prediction
+        logits = self.paraphrase_classifier(dropped_emb)
+
+        return logits.squeeze(-1)
+
 
     def predict_similarity(self, input_ids_1, attention_mask_1, input_ids_2, attention_mask_2):
         """
