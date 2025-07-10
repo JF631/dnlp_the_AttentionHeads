@@ -46,8 +46,6 @@ class AdamW(Optimizer):
                     raise RuntimeError(
                         "Adam does not support sparse gradients, please consider SparseAdam instead"
                     )
-
-                # State should be stored in this dictionary
                 state = self.state[p]
                 
                 if len(state) == 0:
@@ -59,10 +57,9 @@ class AdamW(Optimizer):
                 beta1, beta2 = group['betas']
                 state['step'] += 1
                 step = state['step']
-
-                # Access hyperparameters from the `group` dictionary
                 alpha = group["lr"]
 
+                # the underscore versions are executed inplace
                 # mt = (mt * beta1) + (1 - beta1) * grad
                 mt.mul_(beta1).add_(grad, alpha=(1 - beta1))
                 # vt = (vt * beta2) + (1 - beta2) * grad * grad
