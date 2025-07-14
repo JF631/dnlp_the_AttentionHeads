@@ -28,7 +28,7 @@ from datasets import (
     load_multitask_data,
 )
 
-TQDM_DISABLE = True
+TQDM_DISABLE = False
 
 
 # Perform model evaluation
