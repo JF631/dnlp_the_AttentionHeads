@@ -23,7 +23,7 @@ from datasets import (
 from evaluation import model_eval_multitask, test_model_multitask
 from optimizer import AdamW
 
-TQDM_DISABLE = True
+TQDM_DISABLE = False
 
 
 # fix the random seed
@@ -65,7 +65,12 @@ class MultitaskBERT(nn.Module):
             elif config.option == "finetune":
                 param.requires_grad = True
 
+        # General dropout layer using hidden_dropout_prob
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
+
+        # Sentiment classification layer
+        # This layer will be used for the SST dataset.
+        self.sentiment_classifier = nn.Linear(config.hidden_size, N_SENTIMENT_CLASSES)
 
         # Input is 2 * 768 (two sentance embeddings), output is 1 since it is single 0/1 (yes/no)
         self.paraphrase_classifier = nn.Linear(2 * BERT_HIDDEN_SIZE, 1)
@@ -89,8 +94,13 @@ class MultitaskBERT(nn.Module):
         Thus, your output should contain 5 logits for each sentence.
         Dataset: SST
         """
-        ### TODO
-        raise NotImplementedError
+        cls_embedding = self.forward(input_ids, attention_mask)
+
+        logits_after_dropout = self.dropout(cls_embedding)
+
+        logits = self.sentiment_classifier(logits_after_dropout)
+
+        return logits
 
     def predict_paraphrase(self, input_ids_1, attention_mask_1, input_ids_2, attention_mask_2):
         """
@@ -405,10 +415,7 @@ def get_args():
     # You should split the train data into a train and dev set first and change the
     # default path of the --etpc_dev argument to your dev set.
     parser.add_argument("--etpc_train", type=str, default="data/etpc-paraphrase-train.csv")
-
-    # TODO: THIS IS A SILLY BYPASS TO DO MY QQP TASK!
-    #parser.add_argument("--etpc_dev", type=str, default="data/etpc-paraphrase-dev.csv")
-    parser.add_argument("--etpc_dev", type=str, default="data/etpc-paraphrase-train.csv")
+    parser.add_argument("--etpc_dev", type=str, default="data/etpc-paraphrase-dev.csv")
 
     parser.add_argument(
         "--etpc_test", type=str, default="data/etpc-paraphrase-detection-test-student.csv"
