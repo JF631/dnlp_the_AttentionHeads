@@ -16,7 +16,7 @@ TQDM_DISABLE = False
 
 
 class BartWithClassifier(nn.Module):
-    def __init__(self, num_labels=7):
+    def __init__(self, num_labels=26):
         super(BartWithClassifier, self).__init__()
 
         self.bart = BartModel.from_pretrained("facebook/bart-large", local_files_only=True)
@@ -37,7 +37,7 @@ class BartWithClassifier(nn.Module):
         return probabilities
 
 
-def transform_data(dataset, max_length=512):
+def transform_data(dataset: pd.DataFrame, max_length=512):
     """
     dataset: pd.DataFrame
 
@@ -55,8 +55,48 @@ def transform_data(dataset, max_length=512):
     Return a DataLoader with the TensorDataset. You can choose a batch size of your
     choice.
     """
-    raise NotImplementedError
+    # raise NotImplementedError
+    dataset = dataset.copy()
+    col_keys = list(dataset.columns)
+    tokenizer = AutoTokenizer.from_pretrained("facebook/bart-base")
 
+    sentences1 = dataset['sentence1'].astype('str').tolist()
+    sentences2 = dataset['sentence2'].astype('str').tolist()
+
+    inputs = tokenizer(sentences1, sentences2,
+                       padding=True,
+                       truncation=True,
+                       max_length = max_length,
+                       return_tensors='pt') #pt = pytorch
+
+    input_ids = inputs['input_ids']
+    attention_mask = inputs['attention_mask']
+    if "paraphrase_type_ids" in col_keys:
+        dataset['paraphrase_type_ids'] = dataset['paraphrase_type_ids'].apply(eval)
+        all_labels = set(l for sublist in dataset['paraphrase_type_ids'] for l in sublist if l > 0)
+        label_list = sorted(all_labels)
+        label_map = {label: idx for idx, label in enumerate(label_list)}  # remap to [0, N-1]
+        binarized_labels = np.zeros((len(sentences1), 26), dtype='i4')
+        for i, indices in enumerate(dataset['paraphrase_type_ids']):
+            for label in indices:
+                if label > 0 and label in label_map:
+                    binarized_labels[i, label_map[label]] = 1
+        binarized_labels = torch.tensor(binarized_labels, dtype=torch.long)
+        dataset = TensorDataset(input_ids, attention_mask, binarized_labels)
+    else:
+        dataset = TensorDataset(input_ids, attention_mask)        
+
+    return DataLoader(dataset, batch_size=8, shuffle=True, num_workers=0)
+
+def evaluate_on_dev(model, device, loss_fn, current_batch):
+    dev_losses = []
+    if len(current_batch) != 3:
+        raise RuntimeError(f"Expected batch size 3 (ids, mask, labels) but got {len(current_batch)}") 
+    dev_ids, dev_mask, dev_labels = [b.to(device) for b in current_batch]
+    probs = model(input_ids=dev_ids, attention_mask=dev_mask)
+    loss = loss_fn(probs, dev_labels.float())
+    dev_losses.append(loss.item())
+    return dev_losses    
 
 def train_model(model, train_data, dev_data, device):
     """
@@ -69,8 +109,36 @@ def train_model(model, train_data, dev_data, device):
 
     Return the trained model.
     """
-    ### TODO
-    raise NotImplementedError
+    optimizer = AdamW(model.parameters(), lr=2e-5, weight_decay=0.01)
+    loss_fn = nn.BCELoss()
+
+    n_epochs = 5
+    epoch_losses = np.empty((n_epochs,))
+    dev_epoch_losses = np.empty((n_epochs,))
+    for epoch in tqdm(range(n_epochs), desc="Running training loop"):
+        model.train()
+        losses = []
+        for batch in tqdm(train_data, desc=f"Epoch {epoch + 1}", leave=False):
+            if len(batch) == 3:
+                in_ids, attention_mask, labels = [b.to(device) for b in batch]
+            if len(batch) == 2:
+                continue
+            probs = model(input_ids=in_ids, attention_mask=attention_mask)
+            loss = loss_fn(probs, labels.float())
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+
+            losses.append(loss.item())
+        epoch_losses[epoch] = np.mean(losses)
+        losses.clear()
+        model.eval()
+        with torch.no_grad():
+            for dev_batch in dev_data:
+                dev_losses = evaluate_on_dev(model, device, loss_fn, dev_batch)
+                dev_epoch_losses[epoch] = np.mean(dev_losses)
+
+    return dev_epoch_losses, epoch_losses
 
 
 
@@ -81,7 +149,27 @@ def test_model(model, test_data, test_ids, device):
     The 'Predicted_Paraphrase_Types' column should contain the binary array of your model predictions.
     Return this dataframe.
     """
-    ### TODO
+    threshold = 0.5
+    model = model.to(device)
+    model.eval()
+    model_predictions = []
+    with torch.no_grad():
+        for batch in test_data:
+            if len(batch) == 3:
+                token_ids, attention_mask, _ = [val.to(device) for val in batch]
+            elif len(batch) == 2:
+                token_ids, attention_mask = [val.to(device) for val in batch]
+            else:
+                raise RuntimeError(f"Expected 2 or 3 values in batch, but got {len(batch)}")
+            raw_out = model(input_ids=token_ids, attention_mask=attention_mask)
+            filtered_out = (raw_out > threshold).cpu().tolist()
+            model_predictions.extend(filtered_out)
+
+    rtrn = pd.DataFrame({
+        'id':test_ids,
+        'Predicted_Paraphrase_Types':model_predictions
+    }) 
+    return rtrn
 
     raise NotImplementedError
 
@@ -105,6 +193,7 @@ def evaluate_model(model, test_data, device):
 
             outputs = model(input_ids=input_ids, attention_mask=attention_mask)
             predicted_labels = (outputs > 0.5).int()
+            # print(predicted_labels)
 
             all_pred.append(predicted_labels)
             all_labels.append(labels)
@@ -158,30 +247,43 @@ def get_args():
 def finetune_paraphrase_detection(args):
     model = BartWithClassifier()
     device = torch.device("cuda") if args.use_gpu else torch.device("cpu")
+    if device == 'cpu':
+        raise RuntimeWarning("Training runs on CPU!")
     model.to(device)
 
-    train_dataset = pd.read_csv("data/etpc-paraphrase-train.csv", sep="\t")
-    test_dataset = pd.read_csv("data/etpc-paraphrase-detection-test-student.csv", sep="\t")
+    train_dataset = pd.read_csv("data/etpc-paraphrase-train.csv", sep=",")
+    test_dataset = pd.read_csv("data/etpc-paraphrase-detection-test-student.csv", sep=",")
 
-    # TODO You might do a split of the train data into train/validation set here
-    # (or in the csv files directly)
-    train_data = transform_data(train_dataset)
+    # TODO DONE You might do a split of the train data into train/validation set here
+    # (or in the csv files directly) 
+    train_dataset = train_dataset.sample(frac=1, random_state=args.seed).reset_index(drop=True)
+    split_idx = int(0.6 * len(train_dataset))
+    train_split = train_dataset[:split_idx]
+    validation_split = train_dataset[split_idx:]
+    train_data = transform_data(train_split)
     test_data = transform_data(test_dataset)
+    dev_data = transform_data(validation_split)
+
 
     print(f"Loaded {len(train_dataset)} training samples.")
+    dev_losses, losses = train_model(model, train_data, dev_data, device)
 
-    model = train_model(model, train_data, dev_data, device)
+    print(f"dev losses: {dev_losses}")
+    print(f"losses: {losses}")
 
-    print("Training finished.")
+    print("Training finished, evaluating model performance...")
 
     accuracy, matthews_corr = evaluate_model(model, dev_data, device)
     print(f"The accuracy of the model is: {accuracy:.3f}")
     print(f"Matthews Correlation Coefficient of the model is: {matthews_corr:.3f}")
+    print("done")
 
+    filename = "predictions/bart/etpc-paraphrase-detection-test-output.csv"
+    print(f"Testing the model and saving to {filename}")
     test_ids = test_dataset["id"]
     test_results = test_model(model, test_data, test_ids, device)
     test_results.to_csv(
-        "predictions/bart/etpc-paraphrase-detection-test-output.csv", index=False, sep="\t"
+        filename, index=False, sep="\t"
     )
 
 
