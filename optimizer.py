@@ -46,12 +46,35 @@ class AdamW(Optimizer):
                     raise RuntimeError(
                         "Adam does not support sparse gradients, please consider SparseAdam instead"
                     )
-
-                # State should be stored in this dictionary
                 state = self.state[p]
-
-                # Access hyperparameters from the `group` dictionary
+                
+                if len(state) == 0:
+                    state["step"] = 0
+                    state["mt"] = torch.zeros_like(p.data)
+                    state["vt"] = torch.zeros_like(p.data)
+                
+                mt, vt = state['mt'], state['vt']
+                beta1, beta2 = group['betas']
+                state['step'] += 1
+                step = state['step']
                 alpha = group["lr"]
+
+                # the underscore versions are executed inplace
+                # mt = (mt * beta1) + (1 - beta1) * grad
+                mt.mul_(beta1).add_(grad, alpha=(1 - beta1))
+                # vt = (vt * beta2) + (1 - beta2) * grad * grad
+                vt.mul_(beta2).addcmul_(grad, grad, value=(1 - beta2))
+
+                mt_bias = mt / (1 - (beta1 ** step))
+                vt_bias = vt / (1 - (beta2 ** step))
+
+                p.data.addcdiv_(mt_bias, (vt_bias.sqrt().add(group['eps'])), value=-alpha)
+
+                if group["weight_decay"] != 0:
+                    p.data.add_(p.data, alpha=-alpha * group["weight_decay"])
+
+
+
 
                 # Complete the implementation of AdamW here, reading and saving
                 # your state in the `state` dictionary above.
@@ -67,7 +90,7 @@ class AdamW(Optimizer):
                 # 4- After that main gradient-based update, update again using weight decay
                 #    (incorporating the learning rate again).
 
-                ### TODO
-                raise NotImplementedError
+                ### TODO DONE
+                # raise NotImplementedError
 
         return loss
