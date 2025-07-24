@@ -23,9 +23,9 @@
 |----------------|-----------|------- |
 |Baseline |x%           |...            |
 
-| **Quora Question Pairs (QQP)** | **Metric 1** |**Metric n** |
+| **Quora Question Pairs (QQP)** | **Dev Accuracy** |**Metric n** |
 |----------------|-----------|------- |
-|Baseline |x%           |...            |
+|Baseline |0.781 (78.1%)          |...            |
 
 | **Semantic Textual Similarity (STS)** | **Metric 1** |**Metric n** |
 |----------------|-----------|------- |
