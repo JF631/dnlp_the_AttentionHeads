@@ -19,9 +19,9 @@
 
 ## Results
 
-| **Stanford Sentiment Treebank (SST)** | **Metric 1** |**Metric n** |
-|----------------|-----------|------- |
-|Baseline |x%           |...            |
+| **Stanford Sentiment Treebank (SST)** | **Dev Accuracy** |
+|----------------|-----------|
+|Baseline |0.530 (53.0%)           |
 
 | **Quora Question Pairs (QQP)** | **Dev Accuracy** |**Metric n** |
 |----------------|-----------|------- |
@@ -54,18 +54,18 @@
 - Implement `embed` in `bert.py`
 - Implement Paraphrase detection in `multitask_classifier.py` (implement `predict_paraphrase`, implement data loading of the qqp dataset, implement training loop for the qqp task, implement paraphrase classifier)
 - Implement `forward` methode in `multitask_classifier.py` together with Franziska Ahme.
-- Fix wrong sperator in `dataset.py` together with Franziska Ahme.
+- Fix wrong seperator in `dataset.py` together with Franziska Ahme.
 - Implement dropout layer in `multitask_classifier.py` with Franziska Ahme.
-- Worked on the Optimizer.py together with Jakob Faust, Franziska Ahme and Lennart Hahner.
+- Worked on the `optimizer.py` together with Jakob Faust, Franziska Ahme and Lennart Hahner.
 - Worked together with Franziska Ahme and Jakob Faust to merge and refactor code.
 
 ### Franziska Ahme
 - Implement `add_norm` in `bert.py`
-- Implenent Sentiment Analysis in `multitasl_classifier.py` (implement `predict sentiment`, implement sentiment classifier)
-- Implement `forward` methode in `multitask_classifier.py` together with Lukas Nölke.
-- Fix wrong sperator in `dataset.py` together with Lukas Nölke.
+- Implement Sentiment Analysis in `multitask_classifier.py` (implement `predict_sentiment`, implement sentiment classifier)
+- Implement `forward` method in `multitask_classifier.py` together with Lukas Nölke.
+- Fix wrong seperator in `dataset.py` together with Lukas Nölke.
 - Implement dropout layer in `multitask_classifier.py` with Lukas Nölke.
-- Worked on the Optimizer.py together with Jakob Faust, Lukas Nölke and Lennart Hahner.
+- Worked on the `optimizer.py` together with Jakob Faust, Lukas Nölke and Lennart Hahner.
 - Worked together with Jakob Faust and Lukas Nölke to merge and refactor code.
 
 ### Lennart Hahner
