@@ -27,9 +27,9 @@
 |----------------|-----------|------- |
 |Baseline |0.781 (78.1%)          |...            |
 
-| **Semantic Textual Similarity (STS)** | **Metric 1** |**Metric n** |
-|----------------|-----------|------- |
-|Baseline |x%           |...            |
+| **Semantic Textual Similarity (STS)** | **Dev Accuracy** |
+|----------------|------------------|
+|Baseline | 0.354 (35.4%)               |
 
 | **Paraphrase Type Detection (PTD)** | **Metric 1** |**Metric n** |
 |----------------|-----------|------- |
@@ -72,7 +72,6 @@
 - Implement Similarity Analysis in `multitask_classifier.py` (implement `predict_similarity`)
 - Implement `forward` method in `multitaks_classifier.py`.
 - Fix wrong seperator in `dataset`.
-- Worked on the Optimizer.py together with Jakob Faust, Lukas Nölke and Lennart Hahner.
 - Worked together with Jakob Faust and Lukas Nölke to merge and refactor code.
 
 ### Fabian Kathe
