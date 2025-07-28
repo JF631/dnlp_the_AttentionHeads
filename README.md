@@ -15,6 +15,20 @@
 
 ## Training
 
+#### Part 1: Baseline
+
+To train the model and reproduce our results for the baseline, run this command after activating the environment:
+
+```sh
+
+python multitask_classifier.py --option finetune --task=[sst, sts, qqp, etpc] --use_gpu --local_files_only
+
+```
+
+##### Sentiment Analysis on Stanford Sentiment Treebank (SST) 
+
+Sentiment Analysis is a basic NLP task, that aims to classify a given text's sentiment. The SST dataset consists of 11,855 single sentences from movie reviews and is parsed with the Stanford parser with 215,154 unique phrases from those parse trees. Each phrase was labeled by three human judges from 0 (very negative) to 4 (very positive).
+
 ## Experiments
 
 ## Results
@@ -23,9 +37,9 @@
 |----------------|-----------|
 |Baseline |0.530 (53.0%)           |
 
-| **Quora Question Pairs (QQP)** | **Dev Accuracy** |**Metric n** |
-|----------------|-----------|------- |
-|Baseline |0.781 (78.1%)          |...            |
+| **Quora Question Pairs (QQP)** | **Dev Accuracy** |
+|----------------|-----------|
+|Baseline |0.781 (78.1%)          |
 
 | **Semantic Textual Similarity (STS)** | **Dev Accuracy** |
 |----------------|------------------|
