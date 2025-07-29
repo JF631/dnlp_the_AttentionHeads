@@ -27,8 +27,10 @@ def transform_data(dataset, max_length=256,  shuffle = True):
     from transformers import AutoTokenizer
     from torch.utils.data import DataLoader, TensorDataset
     import torch
+    local_model_path = "/user/fabian.kathe/u17494/.cache/huggingface/hub/models--facebook--bart-large/snapshots/cb48c1365bd826bd521f650dc2e0940aee54720c"
 
-    tokenizer = AutoTokenizer.from_pretrained("facebook/bart-large", local_files_only=True)
+
+    tokenizer = AutoTokenizer.from_pretrained(local_model_path )
 
     input_texts = []
     target_texts = []
@@ -227,9 +229,13 @@ def get_args():
 
 def finetune_paraphrase_generation(args):
     device = torch.device("cuda") if args.use_gpu else torch.device("cpu")
-    model = BartForConditionalGeneration.from_pretrained("facebook/bart-large", local_files_only=True)
+    local_model_path = "/user/fabian.kathe/u17494/.cache/huggingface/hub/models--facebook--bart-large/snapshots/cb48c1365bd826bd521f650dc2e0940aee54720c"
+
+    model = BartForConditionalGeneration.from_pretrained(local_model_path)
+    tokenizer = AutoTokenizer.from_pretrained(local_model_path)
+    #model = BartForConditionalGeneration.from_pretrained("facebook/bart-large", local_files_only=True)
     model.to(device)
-    tokenizer = AutoTokenizer.from_pretrained("facebook/bart-large", local_files_only=True)
+    #tokenizer = AutoTokenizer.from_pretrained("facebook/bart-large", local_files_only=True)
 
     #train_dataset = pd.read_csv("data/etpc-paraphrase-train.csv", sep="\t")
     #dev_dataset = pd.read_csv("data/etpc-paraphrase-dev.csv", sep="\t")
@@ -243,9 +249,9 @@ def finetune_paraphrase_generation(args):
     split_idx = int(0.9 * len(full_train_dataset))
     train_dataset = full_train_dataset[:split_idx]
     # for testing 
-    train_dataset = train_dataset.sample(n=4, random_state=42)
+    #train_dataset = train_dataset.sample(n=4, random_state=42)
     dev_dataset = full_train_dataset[split_idx:]
-    dev_dataset = dev_dataset.sample(n=2, random_state=42)  # Or even n=2
+    #dev_dataset = dev_dataset.sample(n=2, random_state=42)  # Or even n=2
 
     train_data = transform_data(train_dataset)
     dev_data = transform_data(dev_dataset)
