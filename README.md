@@ -51,7 +51,7 @@ Sentiment Analysis is a basic NLP task, that aims to classify a given text's sen
 
 | **Paraphrase Type Generation (PTG)** | **Metric 1** |**Metric n** |
 |----------------|-----------|------- |
-|Baseline |x%           |...            |
+|Baseline |BLEU: 44.3        |...            |
 
 ## Hyperparameter Optimization
 
