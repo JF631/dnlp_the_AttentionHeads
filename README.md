@@ -41,9 +41,9 @@ python multitask_classifier.py --option finetune --task=[sst, sts, qqp] --use_gp
 |----------------|------------------|
 |Baseline | 0.345(34.5%)               |
 
-| **Paraphrase Type Detection (PTD)** | **Metric 1** |**Metric n** |
+| **Paraphrase Type Detection (PTD)** | **Dev Accuracy** |**Matthews Correlation Coefficient (MCC)** |
 |----------------|-----------|------- |
-|Baseline |x%           |...            |
+|Baseline |0.904 (90.4%)           | 0.102           |
 
 | **Paraphrase Type Generation (PTG)** | BLEU Score |
 |----------------|-----------|
