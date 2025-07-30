@@ -16,13 +16,18 @@
 ## Training
 
 #### Part 1: Baseline
+To train the model and reproduce our results for the baseline, run these commands after activating the environment
 
-To train the model and reproduce our results for the baseline, run this command after activating the environment:
+For SST, QQP, STS:
 
 ```sh
 
 python multitask_classifier.py --option finetune --task=[sst, sts, qqp] --use_gpu --local_files_only
 
+```
+For Paraphrase Type Detection:
+```sh
+python bart_detection.py --use_gpu --seed 1171
 ```
 
 ## Experiments
