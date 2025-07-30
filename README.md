@@ -23,8 +23,9 @@ For SST, QQP, STS:
 ```sh
 
 python multitask_classifier.py --option finetune --task=[sst, sts, qqp] --use_gpu --local_files_only
-
 ```
+**Hint**: To make it run for the required subtasks we changed the name of the "etpc_dev" dataset in the code to the test-data for etpc "etpc-paraphrase-detection-test-student".
+
 For Paraphrase Type Detection:
 ```sh
 python bart_detection.py --use_gpu --seed 1171
