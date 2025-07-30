@@ -25,10 +25,6 @@ python multitask_classifier.py --option finetune --task=[sst, sts, qqp] --use_gp
 
 ```
 
-##### Sentiment Analysis on Stanford Sentiment Treebank (SST) 
-
-Sentiment Analysis is a basic NLP task, that aims to classify a given text's sentiment. The SST dataset consists of 11,855 single sentences from movie reviews and is parsed with the Stanford parser with 215,154 unique phrases from those parse trees. Each phrase was labeled by three human judges from 0 (very negative) to 4 (very positive).
-
 ## Experiments
 
 ## Results
@@ -66,18 +62,18 @@ Sentiment Analysis is a basic NLP task, that aims to classify a given text's sen
 ### Lukas Nölke
 - Implement `embed` in `bert.py`
 - Implement Paraphrase detection in `multitask_classifier.py` (implement `predict_paraphrase`, implement data loading of the qqp dataset, implement training loop for the qqp task, implement paraphrase classifier)
-- Implement `forward` methode in `multitask_classifier.py` together with Franziska Ahme and Lennart Hahner.
-- Implement dropout layer in `multitask_classifier.py` with Franziska Ahme.
+- Implement `forward` methode in `multitask_classifier.py` together with Franziska Ahme and Lennart Hahner
+- Implement dropout layer in `multitask_classifier.py` with Franziska Ahme
 
 ### Franziska Ahme
 - Implement `add_norm` in `bert.py`
 - Implement Sentiment Analysis in `multitask_classifier.py` (implement `predict_sentiment`, implement sentiment classifier)
-- Implement `forward` method in `multitask_classifier.py` together with Lennart Hahner and Lukas Nölke.
-- Implement dropout layer in `multitask_classifier.py` with Lukas Nölke.
+- Implement `forward` method in `multitask_classifier.py` together with Lennart Hahner and Lukas Nölke
+- Implement dropout layer in `multitask_classifier.py` with Lukas Nölke
 
 ### Lennart Hahner
 - Implement Similarity Analysis in `multitask_classifier.py` (implement `predict_similarity`)
-- Implement `forward` method in `multitaks_classifier.py` with Franziska Ahme and Lukas Nölke.
+- Implement `forward` method in `multitaks_classifier.py` with Franziska Ahme and Lukas Nölke
 
 ### Fabian Kathe
 
