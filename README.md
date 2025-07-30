@@ -21,7 +21,7 @@ To train the model and reproduce our results for the baseline, run this command 
 
 ```sh
 
-python multitask_classifier.py --option finetune --task=[sst, sts, qqp, etpc] --use_gpu --local_files_only
+python multitask_classifier.py --option finetune --task=[sst, sts, qqp] --use_gpu --local_files_only
 
 ```
 
@@ -59,34 +59,25 @@ Sentiment Analysis is a basic NLP task, that aims to classify a given text's sen
 
 ## Members Contribution
 ### Jakob Faust
-- Implemented `attention` and the `forward` method in `bert.py` 
-- Implemented the Paraphrase type detection task (worked on the `bart_detection.py` file)
-- Worked on the Optimizer.py together with Lukas Nölke, Franziska Ahme and Lennart Hahner.
-- Worked together with Franziska Ahme and Lukas Nölke to merge and refactor code.  
+- Implement `attention` and the `forward` method in `bert.py` 
+- Implement the Paraphrase type detection task (worked on the `bart_detection.py` file)
+- Worked on the `optimizer.py`
 
 ### Lukas Nölke
 - Implement `embed` in `bert.py`
 - Implement Paraphrase detection in `multitask_classifier.py` (implement `predict_paraphrase`, implement data loading of the qqp dataset, implement training loop for the qqp task, implement paraphrase classifier)
-- Implement `forward` methode in `multitask_classifier.py` together with Franziska Ahme.
-- Fix wrong seperator in `dataset.py` together with Franziska Ahme.
+- Implement `forward` methode in `multitask_classifier.py` together with Franziska Ahme and Lennart Hahner.
 - Implement dropout layer in `multitask_classifier.py` with Franziska Ahme.
-- Worked on the `optimizer.py` together with Jakob Faust, Franziska Ahme and Lennart Hahner.
-- Worked together with Franziska Ahme and Jakob Faust to merge and refactor code.
 
 ### Franziska Ahme
 - Implement `add_norm` in `bert.py`
 - Implement Sentiment Analysis in `multitask_classifier.py` (implement `predict_sentiment`, implement sentiment classifier)
-- Implement `forward` method in `multitask_classifier.py` together with Lukas Nölke.
-- Fix wrong seperator in `dataset.py` together with Lukas Nölke.
+- Implement `forward` method in `multitask_classifier.py` together with Lennart Hahner and Lukas Nölke.
 - Implement dropout layer in `multitask_classifier.py` with Lukas Nölke.
-- Worked on the `optimizer.py` together with Jakob Faust, Lukas Nölke and Lennart Hahner.
-- Worked together with Jakob Faust and Lukas Nölke to merge and refactor code.
 
 ### Lennart Hahner
 - Implement Similarity Analysis in `multitask_classifier.py` (implement `predict_similarity`)
-- Implement `forward` method in `multitaks_classifier.py`.
-- Fix wrong seperator in `dataset`.
-- Worked together with Jakob Faust and Lukas Nölke to merge and refactor code.
+- Implement `forward` method in `multitaks_classifier.py` with Franziska Ahme and Lukas Nölke.
 
 ### Fabian Kathe
 
