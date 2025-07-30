@@ -11,6 +11,10 @@ from transformers import AutoTokenizer, BartModel
 from sklearn.metrics import matthews_corrcoef
 from optimizer import AdamW
 
+# Only for evaluation purposes
+from sklearn.metrics import multilabel_confusion_matrix, ConfusionMatrixDisplay
+import matplotlib.pyplot as plt
+
 
 TQDM_DISABLE = False
 
@@ -71,20 +75,20 @@ def transform_data(dataset: pd.DataFrame, max_length=512):
 
     input_ids = inputs['input_ids']
     attention_mask = inputs['attention_mask']
+    unused_ids = [12, 19, 20, 23, 27]
+    valid_labels = sorted(set(range(1, 32)) - set(unused_ids))
+    label_map = {label: idx for idx, label in enumerate(valid_labels)} 
     if "paraphrase_type_ids" in col_keys:
         dataset['paraphrase_type_ids'] = dataset['paraphrase_type_ids'].apply(eval)
-        all_labels = set(l for sublist in dataset['paraphrase_type_ids'] for l in sublist if l > 0)
-        label_list = sorted(all_labels)
-        label_map = {label: idx for idx, label in enumerate(label_list)}  # remap to [0, N-1]
-        binarized_labels = np.zeros((len(sentences1), 26), dtype='i4')
-        for i, indices in enumerate(dataset['paraphrase_type_ids']):
-            for label in indices:
-                if label > 0 and label in label_map:
+        binarized_labels = np.zeros((len(sentences1), len(valid_labels)), dtype='i4')
+        for i, label_list in enumerate(dataset['paraphrase_type_ids']):
+            for label in label_list:
+                if label in label_map:
                     binarized_labels[i, label_map[label]] = 1
         binarized_labels = torch.tensor(binarized_labels, dtype=torch.long)
         dataset = TensorDataset(input_ids, attention_mask, binarized_labels)
     else:
-        dataset = TensorDataset(input_ids, attention_mask)        
+        dataset = TensorDataset(input_ids, attention_mask)
 
     return DataLoader(dataset, batch_size=8, shuffle=True, num_workers=0)
 
@@ -109,10 +113,10 @@ def train_model(model, train_data, dev_data, device):
 
     Return the trained model.
     """
-    optimizer = AdamW(model.parameters(), lr=2e-5, weight_decay=0.01)
+    optimizer = AdamW(model.parameters(), lr=1e-5, weight_decay=0.01)
     loss_fn = nn.BCELoss()
 
-    n_epochs = 5
+    n_epochs = 3
     epoch_losses = np.empty((n_epochs,))
     dev_epoch_losses = np.empty((n_epochs,))
     for epoch in tqdm(range(n_epochs), desc="Running training loop"):
@@ -149,7 +153,7 @@ def test_model(model, test_data, test_ids, device):
     The 'Predicted_Paraphrase_Types' column should contain the binary array of your model predictions.
     Return this dataframe.
     """
-    threshold = 0.5
+    threshold = 0.7
     model = model.to(device)
     model.eval()
     model_predictions = []
@@ -162,7 +166,8 @@ def test_model(model, test_data, test_ids, device):
             else:
                 raise RuntimeError(f"Expected 2 or 3 values in batch, but got {len(batch)}")
             raw_out = model(input_ids=token_ids, attention_mask=attention_mask)
-            filtered_out = (raw_out > threshold).cpu().tolist()
+            # filtered_out = (raw_out > threshold).cpu().tolist()
+            filtered_out = (raw_out > threshold).int().cpu().tolist()
             model_predictions.extend(filtered_out)
 
     rtrn = pd.DataFrame({
@@ -192,7 +197,7 @@ def evaluate_model(model, test_data, device):
             attention_mask = attention_mask.to(device)
 
             outputs = model(input_ids=input_ids, attention_mask=attention_mask)
-            predicted_labels = (outputs > 0.5).int()
+            predicted_labels = (outputs > 0.7).int()
             # print(predicted_labels)
 
             all_pred.append(predicted_labels)
@@ -222,6 +227,29 @@ def evaluate_model(model, test_data, device):
     # Calculate the average accuracy over all labels
     accuracy = np.mean(accuracies)
     matthews_coefficient = np.mean(matthews_coefficients)
+
+    co_matrix = np.zeros((26, 26), dtype=int)
+
+    for t, p in zip(true_labels_np, predicted_labels_np):
+        true_indices = np.where(t == 1)[0]
+        pred_indices = np.where(p == 1)[0]
+        for i in true_indices:
+            for j in pred_indices:
+                co_matrix[i, j] += 1
+
+    plt.figure(figsize=(8, 7))
+    plt.imshow(co_matrix, cmap='Blues', interpolation='nearest')
+    plt.title("Multi-label Co-occurrence Matrix (True vs Predicted)")
+    plt.xlabel("Predicted Label")
+    plt.ylabel("True Label")
+    plt.colorbar(label="Count")
+    plt.xticks(np.arange(26))
+    plt.yticks(np.arange(26))
+    plt.tight_layout()
+    plt.savefig("multilabel_cooccurrence_matrix_2.png", dpi=300)
+    plt.close()
+
+
     model.train()
     return accuracy, matthews_coefficient
 
@@ -257,7 +285,7 @@ def finetune_paraphrase_detection(args):
     # TODO DONE You might do a split of the train data into train/validation set here
     # (or in the csv files directly) 
     train_dataset = train_dataset.sample(frac=1, random_state=args.seed).reset_index(drop=True)
-    split_idx = int(0.6 * len(train_dataset))
+    split_idx = int(0.8 * len(train_dataset))
     train_split = train_dataset[:split_idx]
     validation_split = train_dataset[split_idx:]
     train_data = transform_data(train_split)
