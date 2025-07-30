@@ -39,7 +39,7 @@ python multitask_classifier.py --option finetune --task=[sst, sts, qqp] --use_gp
 
 | **Semantic Textual Similarity (STS)** | **Dev Accuracy** |
 |----------------|------------------|
-|Baseline | 0.354 (35.4%)               |
+|Baseline | 0.345(34.5%)               |
 
 | **Paraphrase Type Detection (PTD)** | **Metric 1** |**Metric n** |
 |----------------|-----------|------- |
@@ -76,7 +76,8 @@ python multitask_classifier.py --option finetune --task=[sst, sts, qqp] --use_gp
 - Implement `forward` method in `multitaks_classifier.py` with Franziska Ahme and Lukas Nölke
 
 ### Fabian Kathe
-
+- Implemented context of empty pipeline with transform_data, train_model, test_model, evaluate_model, finetune_paraphrase_generation
+- Uploaded chache with base model to Cluster, needed for finetuning and for local files only
 
 
 # AI-Usage Card
