@@ -71,7 +71,7 @@ class BertSelfAttention(nn.Module):
         attention_mask: [bs, 1, 1, seq_len]
         output: [bs, seq_len, hidden_state]
         """
-        # first, we have to generate the key, value, query for each token for multi-head attention w/ transform (more details inside the function)
+        # first, we have to generate the key, value, query for each token for multi-head attention w/ transform (more details 	     inside the function)
         # of *_layers are of [bs, num_attention_heads, seq_len, attention_head_size]
         key_layer = self.transform(hidden_states, self.key)
         value_layer = self.transform(hidden_states, self.value)
@@ -205,8 +205,6 @@ class BertModel(BertPreTrainedModel):
 
         # Get word embedding from self.word_embedding into input_embeds.
         inputs_embeds = None
-        ### TODO
-        # raise NotImplementedError
         inputs_embeds = self.word_embedding(input_ids) # shape: [batch_size, seq_length, hidden_size]
 
         # Get position index and position embedding from self.pos_embedding into pos_embeds.
@@ -214,17 +212,12 @@ class BertModel(BertPreTrainedModel):
         pos_ids = pos_ids.expand(input_shape)       # shape: [batch_size, seq_length]
 
         pos_embeds = None
-        ### TODO
-        # raise NotImplementedError
         pos_embeds = self.pos_embedding(pos_ids)    # shape: [batch_size, seq_length, hidden_size]
 
         # Get token type ids, since we are not considering token type,
-        # this is just a placeholder.
         tk_type_ids = torch.zeros(input_shape, dtype=torch.long, device=input_ids.device)
         tk_type_embeds = self.tk_type_embedding(tk_type_ids)
 
-        ### TODO
-        # raise NotImplementedError
         # Add three embeddings together; then apply embed_layer_norm and dropout and
         # return the hidden states.
         embeddings = inputs_embeds + pos_embeds + tk_type_embeds    # all three tensors have same shape: [batch_size, seq_length, hidden_size]
