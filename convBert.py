@@ -1,8 +1,19 @@
+# convBert.py
+# Implements ConvBERT-style blocks on top of a BERT skeleton, plus a hybrid loader
+# that imports as many weights as possible from a HuggingFace BERT checkpoint.
+#
+# Key terms used in comments to match your terminology:
+# - Embed Layer
+# - BERT Layer (here: ConvBertLayer or BertLayer)
+# - Linear Transformation Layer
+# - Layer Flow
+
 import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+# These imports are assumed to exist in your project (as in your original BERT file).
 from base_bert import BertPreTrainedModel
 from utils import get_extended_attention_mask
 
@@ -112,7 +123,6 @@ class SpanConvBlock(nn.Module):
         exp = getattr(config, "conv_expansion", 2)
         p = k // 2
         groups = getattr(config, "conv_groups", hidden)  # depthwise by default
-        self._expects_mask_4d = True  # helper for convenience
 
         # Depthwise + Pointwise (1x1) convs
         self.dw = nn.Conv1d(hidden, hidden, kernel_size=k, padding=p, groups=groups, bias=True)
@@ -132,7 +142,6 @@ class SpanConvBlock(nn.Module):
         if attention_mask.dim() == 2:
             return attention_mask.to(dtype=torch.long)
         # extended mask: tokens -> 0, pads -> negative large
-        # token mask = (mask == 0)
         m = (attention_mask[:, 0, 0, :] == 0).to(dtype=torch.long)
         return m
 
@@ -228,6 +237,8 @@ class BertModel(BertPreTrainedModel):
     Embed Layer -> a stack of N BERT Layers (BertLayer or ConvBertLayer) -> Pooler (Linear Transformation Layer + Tanh).
     """
     def __init__(self, config):
+        if not hasattr(config, "name_or_path"):
+            setattr(config, "name_or_path", "convbert-initialized")
         super().__init__(config)
         self.config = config
 
@@ -306,6 +317,7 @@ class BertModel(BertPreTrainedModel):
 
         return {"last_hidden_state": sequence_output, "pooler_output": first_tk}
 
+
 # For convenience, keep a ConvBertModel alias that always uses ConvBertLayer
 class ConvBertModel(BertModel):
     def __init__(self, config):
@@ -316,6 +328,7 @@ class ConvBertModel(BertModel):
             config.use_convbert = True
         super().__init__(config)
 
+
 __all__ = [
     "BertModel",
     "ConvBertModel",
@@ -324,3 +337,129 @@ __all__ = [
     "SpanConvBlock",
     "BertSelfAttention",
 ]
+
+from types import SimpleNamespace
+
+def _build_convbert_config_from_hf(hf_config, override: dict = None):
+    """Create a SimpleNamespace config for our ConvBERT from an HF BertConfig."""
+    override = override or {}
+    cfg = SimpleNamespace(
+        vocab_size=getattr(hf_config, "vocab_size", 30522),
+        hidden_size=getattr(hf_config, "hidden_size", 768),
+        num_attention_heads=getattr(hf_config, "num_attention_heads", 12),
+        intermediate_size=getattr(hf_config, "intermediate_size", 3072),
+        num_hidden_layers=getattr(hf_config, "num_hidden_layers", 12),
+        max_position_embeddings=getattr(hf_config, "max_position_embeddings", 512),
+        type_vocab_size=getattr(hf_config, "type_vocab_size", 2),
+        pad_token_id=getattr(hf_config, "pad_token_id", 0),
+        layer_norm_eps=getattr(hf_config, "layer_norm_eps", 1e-12),
+        hidden_dropout_prob=getattr(hf_config, "hidden_dropout_prob", 0.1),
+        attention_probs_dropout_prob=getattr(hf_config, "attention_probs_dropout_prob", 0.1),
+        # ConvBERT specifics (random init):
+        initializer_range=getattr(hf_config, "initializer_range", 0.02),
+        use_convbert=True,
+        conv_kernel_size=override.get("conv_kernel_size", 7),
+        conv_groups=override.get("conv_groups", getattr(hf_config, "hidden_size", 768)),
+        conv_expansion=override.get("conv_expansion", 2),
+        conv_dropout_prob=override.get("conv_dropout_prob", getattr(hf_config, "hidden_dropout_prob", 0.1)),
+        conv_fuse=override.get("conv_fuse", "sum"),
+        name_or_path=getattr(hf_config, "name_or_path", None) or "bert-from-pretrained"
+    )
+    return cfg
+
+
+def _copy_module_params(dst_mod: nn.Module, src_w: torch.Tensor | None, src_b: torch.Tensor | None):
+    with torch.no_grad():
+        if src_w is not None and hasattr(dst_mod, "weight") and dst_mod.weight is not None:
+            dst_mod.weight.copy_(src_w)
+        if src_b is not None and hasattr(dst_mod, "bias") and getattr(dst_mod, "bias") is not None:
+            dst_mod.bias.copy_(src_b)
+
+
+def _copy_layer_norm(dst_ln: nn.LayerNorm, src_weight: torch.Tensor, src_bias: torch.Tensor):
+    with torch.no_grad():
+        dst_ln.weight.copy_(src_weight)
+        dst_ln.bias.copy_(src_bias)
+
+
+def _load_hf_into_convbert(model: 'BertModel', hf_model: 'transformers.BertModel'):
+    """Copy as many parameters as possible from HF BERT into our ConvBERT model.
+    Embeddings, encoder attention/ffn/ln, and pooler are ported. Convolution blocks remain randomly initialized.
+    """
+    sd = hf_model.state_dict()
+
+    # --- Embeddings ---
+    _copy_module_params(model.word_embedding, sd["embeddings.word_embeddings.weight"], None)
+    _copy_module_params(model.pos_embedding, sd["embeddings.position_embeddings.weight"], None)
+    if "embeddings.token_type_embeddings.weight" in sd:
+        _copy_module_params(model.word_embedding, sd.get("embeddings.word_embeddings.weight"), None)
+        _copy_module_params(model.pos_embedding, sd.get("embeddings.position_embeddings.weight"), None)
+        _copy_module_params(model.tk_type_embedding, sd.get("embeddings.token_type_embeddings.weight"), None)
+        _copy_layer_norm(model.embed_layer_norm,
+                         sd["embeddings.LayerNorm.weight"],
+                         sd["embeddings.LayerNorm.bias"])
+
+    # --- Encoder layers ---
+    for i, layer in enumerate(model.bert_layers):
+        # Self-Attention (Q,K,V)
+        _copy_module_params(layer.self_attention.query,
+                            sd[f"encoder.layer.{i}.attention.self.query.weight"],
+                            sd[f"encoder.layer.{i}.attention.self.query.bias"])
+        _copy_module_params(layer.self_attention.key,
+                            sd[f"encoder.layer.{i}.attention.self.key.weight"],
+                            sd[f"encoder.layer.{i}.attention.self.key.bias"])
+        _copy_module_params(layer.self_attention.value,
+                            sd[f"encoder.layer.{i}.attention.self.value.weight"],
+                            sd[f"encoder.layer.{i}.attention.self.value.bias"])
+
+        # Attention output dense + LayerNorm
+        _copy_module_params(layer.attention_dense,
+                            sd[f"encoder.layer.{i}.attention.output.dense.weight"],
+                            sd[f"encoder.layer.{i}.attention.output.dense.bias"])
+        _copy_layer_norm(layer.attention_layer_norm,
+                         sd[f"encoder.layer.{i}.attention.output.LayerNorm.weight"],
+                         sd[f"encoder.layer.{i}.attention.output.LayerNorm.bias"])
+
+        # Feed-Forward
+        _copy_module_params(layer.interm_dense,
+                            sd[f"encoder.layer.{i}.intermediate.dense.weight"],
+                            sd[f"encoder.layer.{i}.intermediate.dense.bias"])
+        _copy_module_params(layer.out_dense,
+                            sd[f"encoder.layer.{i}.output.dense.weight"],
+                            sd[f"encoder.layer.{i}.output.dense.bias"])
+        _copy_layer_norm(layer.out_layer_norm,
+                         sd[f"encoder.layer.{i}.output.LayerNorm.weight"],
+                         sd[f"encoder.layer.{i}.output.LayerNorm.bias"])
+
+    # --- Pooler ---
+    if "pooler.dense.weight" in sd:
+        _copy_module_params(model.pooler_dense, sd["pooler.dense.weight"], sd["pooler.dense.bias"])
+
+
+# Attach a user-friendly classmethod on BertModel
+def _attach_from_pretrained_on_BertModel():
+    def from_pretrained(cls, name_or_path: str = "bert-base-uncased", local_files_only: bool = False, **kwargs):
+        from transformers import BertModel as HFBertModel  # HF is only needed at load time
+        # 1) load HF BERT
+        hf_model = HFBertModel.from_pretrained(name_or_path, local_files_only=local_files_only, **kwargs)
+        hf_config = hf_model.config
+        # 2) build our ConvBERT config
+        override = dict(
+            conv_kernel_size=kwargs.pop("conv_kernel_size", 7),
+            conv_groups=kwargs.pop("conv_groups", getattr(hf_config, "hidden_size", 768)),
+            conv_expansion=kwargs.pop("conv_expansion", 2),
+            conv_dropout_prob=kwargs.pop("conv_dropout_prob", getattr(hf_config, "hidden_dropout_prob", 0.1)),
+            conv_fuse=kwargs.pop("conv_fuse", "sum"),
+        )
+        conv_cfg = _build_convbert_config_from_hf(hf_config, override=override)
+        conv_cfg.name_or_path = name_or_path
+        # 3) init our model (this creates ConvBertLayers, SpanConvBlocks get random init)
+        model = cls(conv_cfg)
+        # 4) copy common weights from HF BERT
+        _load_hf_into_convbert(model, hf_model)
+        return model
+
+    setattr(BertModel, "from_pretrained", classmethod(from_pretrained))
+
+# execute the attachment at import-time
+_attach_from_pretrained_on_BertModel()

@@ -14,7 +14,7 @@ from torch import nn
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from bert import BertModel
+from convBert import BertModel
 from datasets import (
     SentenceClassificationDataset,
     SentencePairDataset,
@@ -59,6 +59,7 @@ class MultitaskBERT(nn.Module):
         self.bert = BertModel.from_pretrained(
             "bert-base-uncased", local_files_only=config.local_files_only
         )
+
         for param in self.bert.parameters():
             if config.option == "pretrain":
                 param.requires_grad = False
