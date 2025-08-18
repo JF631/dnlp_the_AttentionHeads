@@ -240,6 +240,10 @@ def train_multitask(args):
             collate_fn=quora_dev_data.collate_fn
         )
 
+    # Early Stopping setup
+    patience = 2
+    patience_counter = 0
+
     # Init model
     config = {
         "hidden_dropout_prob": args.hidden_dropout_prob,
@@ -379,6 +383,13 @@ def train_multitask(args):
         if dev_acc > best_dev_acc:
             best_dev_acc = dev_acc
             save_model(model, optimizer, args, config, args.filepath)
+            patience_counter = 0
+        else:
+            patience_counter += 1
+            print(f"Early stopping patience counter: {patience_counter}/{patience}")
+            if patience_counter >= patience:
+                print("##### Early stopping triggered. Ending Training. #####")
+                break
 
 
 def test_model(args):
