@@ -1,163 +1,326 @@
+import math
 import torch
 import torch.nn as nn
-from transformers import BertTokenizer
-import math
 import torch.nn.functional as F
 
-class ConvBERTConfig:
-	def __init__(self, vocab_size=12000,
-                 hidden_size=128, num_hidden_layers=2,
-                 num_attention_heads=4,
-                 num_conv_heads=1,
-                 intermediate_size=256,
-                 max_position_embeddings=256,
-                 type_vocab_size=2,
-                 hidden_dropout_prob=0.1,
-                 attention_probs_dropout_prob=0.1,
-                 layer_norm_eps=1e-12,
-                 conv_kernel_size=9,
-                 conv_glu=True,
-                 pad_token_id=0):
-				self.vocab_size=vocab_size
-				self.hidden_size=hidden_size
-				self.num_hidden_layers=num_hidden_layers
-				self.num_attention_heads=num_attention_heads
-				self.num_conv_heads=num_conv_heads
-				self.intermediate_size=intermediate_size
-				self.max_position_embeddings=max_position_embeddings
-				self.type_vocab_size=type_vocab_size
-				self.hidden_dropout_prob=hidden_dropout_prob
-				self.attention_probs_dropout_prob=attention_probs_dropout_prob
-				self.layer_norm_eps=layer_norm_eps
-				self.conv_kernel_size=conv_kernel_size
-				self.conv_glu=conv_glu
-				self.pad_token_id=pad_token_id
-				print("Configuration data loaded.")
-				assert self.num_attention_heads > self.num_conv_heads >= 1
-				assert self.hidden_size % self.num_attention_heads == 0
-				assert self.conv_kernel_size % 2 == 1
-
-class Embeddings(nn.Module):
-    def __init__(self, config: ConvBERTConfig):
-        super().__init__()
-        self.word_embedding = nn.Embedding(
-            config.vocab_size, config.hidden_size, padding_idx=config.pad_token_id
-        )
-        self.pos_embedding  = nn.Embedding(
-            config.max_position_embeddings, config.hidden_size
-        )
-        self.tk_type_embedding = nn.Embedding(
-            config.type_vocab_size, config.hidden_size
-        )
-        self.ln = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
-        self.dropout = nn.Dropout(config.hidden_dropout_prob)
-        position_ids = torch.arange(config.max_position_embeddings, dtype=torch.long).unsqueeze(0)
-        self.register_buffer("position_ids", position_ids, persistent=False)
-
-    def forward(self, input_ids, token_type_ids=None):
-        b, t = input_ids.shape
-        if token_type_ids is None:
-            token_type_ids = torch.zeros(b, t, dtype=torch.long, device=input_ids.device)
-        pos_ids = self.position_ids[:, :t].to(input_ids.device)
-        x = ( self.word_embedding(input_ids)
-            + self.pos_embedding(pos_ids)
-            + self.tk_type_embedding(token_type_ids) )
-        return self.dropout(self.ln(x))
+from base_bert import BertPreTrainedModel
+from utils import get_extended_attention_mask
 
 class BertSelfAttention(nn.Module):
-	def __init__(self, config: ConvBERTConfig, num_heads_override=None):
-		super().__init__()
-		self.num_heads = num_heads_override or config.num_attention_heads
-		self.head_dim = config.hidden_size // self.num_heads
-		self.hidden_size = self.head_dim * self.num_heads
-		self.q = nn.Linear(config.hidden_size, config.hidden_size) # y = x*w^T+b
-		self.k = nn.Linear(config.hidden_size, config.hidden_size)
-		self.v = nn.Linear(config.hidden_size, config.hidden_size)
-		self.out = nn.Linear(config.hidden_size, config.hidden_size)
-		self.dropout = nn.Dropout(config.hidden_dropout_prob)
+    def __init__(self, config):
+        super().__init__()
 
-	def forward(self, x, attention_mask=None):
-		B, T, H = x.shape
+        self.num_attention_heads = config.num_attention_heads
+        self.attention_head_size = int(config.hidden_size / config.num_attention_heads)
+        self.all_head_size = self.num_attention_heads * self.attention_head_size
 
-		# From "all heads in one big vector" -> "batch of multiple smaller head vectors"
-		def shape_proj(w): # w is a linear layer
-			y = w(x)  # (B -> Batch, T -> sequence length, H -> Hidden Size)
-			y = y.view(B, T, self.num_heads, self.head_dim)  # (B, T, nh -> number of heads, hd -> head dim)
-			return y.transpose(1, 2)  # (B, nh, T, hd) -> transpose because  it's easier to batch over heads.
+        # Linear Transformation Layers for Q, K, V
+        self.query = nn.Linear(config.hidden_size, self.all_head_size)
+        self.key = nn.Linear(config.hidden_size, self.all_head_size)
+        self.value = nn.Linear(config.hidden_size, self.all_head_size)
 
-		q = shape_proj(self.q)
-		k = shape_proj(self.k)
-		v = shape_proj(self.v)
+        # dropout applied to attention probabilities
+        self.dropout = nn.Dropout(getattr(config, "attention_probs_dropout_prob", 0.1))
 
-		scores = torch.matmul(q, k.transpose(-1, -2)) / math.sqrt(self.head_dim)
-		if attention_mask is not None:
-			scores = scores + attention_mask
-		probs = F.softmax(scores, dim=-1)
-		print("probs: ", probs)
-		probs = self.dropout(probs)
-		ctx = torch.matmul(probs, v) # applying attention scores to values
-		ctx = ctx.transpose(1, 2).contiguous().view(B, T, self.num_heads * self.head_dim) # merge heads back
-		return self.out(ctx)
+    def transform(self, x, linear_layer):
+        # Project hidden states then split into heads
+        bs, seq_len = x.shape[:2]
+        proj = linear_layer(x)  # [bs, seq_len, all_head_size]
+        proj = proj.view(bs, seq_len, self.num_attention_heads, self.attention_head_size)
+        proj = proj.transpose(1, 2)  # [bs, heads, seq, head_dim]
+        return proj
 
-class ConvBranch(nn.Module):
-	def __init__(self, config: ConvBERTConfig, out_size: int):
-		super().__init__()
-		k = config.conv_kernel_size
-		pad = k // 2
-		self.depthwise = nn.Conv1d(H, H, kernel_size=k, padding=pad, groups=H)
-		self.glu = config.conv_glu
-		self.pointwise = nn.Conv1d(H, 2*out_size if self.glu else out_size, kernel_size=1)
-		self.act = nn.SiLU()
-		self.ln = nn.LayerNorm(out_size)
+    def attention(self, key, query, value, attention_mask):
+        # Scaled dot-product attention with mask
+        # key, query, value: [bs, heads, seq, head_dim]
+        S = torch.matmul(query, key.transpose(-2, -1))  # [bs, heads, seq, seq]
+        scale = math.sqrt(self.attention_head_size)
+        S = S / scale
+        # attention_mask expected: [bs, 1, 1, seq]; 0 for tokens, large negative for pads
+        S = S + attention_mask
+        S = F.softmax(S, dim=-1)
+        S = self.dropout(S)
+        attn_value = torch.matmul(S, value)  # [bs, heads, seq, head_dim]
+        return attn_value
 
-	def forward(self, x, pad_mask=None):
-		y = x.transpose(1, 2)  # [B,H,T]
-		if pad_mask is not None:
-			m = (pad_mask == 0).float().squeeze(1).squeeze(1)  # [B,T]
-			y = y * m.unsqueeze(1)
-		y = self.depthwise(y)
-		y = self.pointwise(y)
-		if self.glu:
-			a, g = y.chunk(2, dim=1)
-			y = a * torch.sigmoid(g)
-		y = self.act(y)
-		y = y.transpose(1, 2)  # [B,T,C]
-		return self.ln(y)
+    def forward(self, hidden_states, attention_mask):
+        # Compute multi-head attention
+        key_layer = self.transform(hidden_states, self.key)
+        value_layer = self.transform(hidden_states, self.value)
+        query_layer = self.transform(hidden_states, self.query)
+        attn_value = self.attention(key_layer, query_layer, value_layer, attention_mask)
+        return attn_value
 
-class TestSmoke():
-	def testEmbeddings(self):
-		def smokeTestEmbedding():
-			vocab_size = 100  # means valid token IDs are 0..99
-			pad_token_id = 0  # reserve 0 for [PAD]
-			batch_size = 2
-			seq_len = 5
+class BertLayer(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        # Self-Attention block
+        self.self_attention = BertSelfAttention(config)
 
-			input_ids = torch.randint(
-				low=1, high=vocab_size, size=(batch_size, seq_len), dtype=torch.long
-			)
-			input_ids[0, -1] = pad_token_id
-			token_type_ids = torch.randint(0, 2, (batch_size, seq_len), dtype=torch.long)
-			print("input_ids:\n", input_ids)
-			print("token_type_ids:\n", token_type_ids)
-			cfg = ConvBERTConfig()
-			emb = Embeddings(cfg)
-			out = emb.forward(input_ids, token_type_ids)
-			print(out)
+        # Add & Norm after attention
+        self.attention_dense = nn.Linear(config.hidden_size, config.hidden_size)  # Linear Transformation Layer
+        self.attention_layer_norm = nn.LayerNorm(config.hidden_size, eps=getattr(config, "layer_norm_eps", 1e-12))
+        self.attention_dropout = nn.Dropout(getattr(config, "hidden_dropout_prob", 0.1))
 
-	def testBertSelfAttention(self):
-		cfg = ConvBERTConfig()
-		batch_size = 2
-		seq_len = 5
-		hidden_size =  cfg.hidden_size
-		num_heads = cfg.num_attention_heads
+        # Feed-Forward block
+        self.interm_dense = nn.Linear(config.hidden_size, config.intermediate_size)  # Linear Transformation Layer
+        self.interm_af = F.gelu
+        self.out_dense = nn.Linear(config.intermediate_size, config.hidden_size)    # Linear Transformation Layer
+        self.out_layer_norm = nn.LayerNorm(config.hidden_size, eps=getattr(config, "layer_norm_eps", 1e-12))
+        self.out_dropout = nn.Dropout(getattr(config, "hidden_dropout_prob", 0.1))
 
-		# Fake "token embeddings"
-		x = torch.randn(batch_size, seq_len, hidden_size)
+    def _merge_heads(self, attn_value, bs, seq_len, hidden_size):
+        # [bs, heads, seq, head_dim] -> [bs, seq, hidden]
+        return attn_value.transpose(1, 2).contiguous().view(bs, seq_len, hidden_size)
 
-		bertSelfAttention = BertSelfAttention(cfg)
-		bertSelfAttention.forward(x)
+    def add_norm(self, residual_input, sublayer_out, dense_layer, dropout, ln_layer):
+        # Generic: Linear Transformation Layer -> Dropout -> Residual -> LayerNorm
+        transformed = dense_layer(sublayer_out)
+        dropped = dropout(transformed)
+        return ln_layer(residual_input + dropped)
 
-if __name__ == "__main__":
-	x = torch.randn(4, 3)
+    def forward(self, hidden_states, attention_mask):
+        """
+        Layer Flow (BERT Layer):
+        Input -> Self-Attention -> (Linear Transformation Layer + Dropout + Add&Norm) ->
+                Feed-Forward -> (Linear Transformation Layer + Dropout + Add&Norm)
+        """
+        bs, seq_len, hidden_size = hidden_states.size()
+
+        # Self-Attention
+        attn_value = self.self_attention(hidden_states, attention_mask)                     # [bs, heads, seq, head_dim]
+        attn_value = self._merge_heads(attn_value, bs, seq_len, hidden_size)               # [bs, seq, hidden]
+        attention_out = self.add_norm(hidden_states, attn_value,
+                                      self.attention_dense, self.attention_dropout, self.attention_layer_norm)
+
+        # Feed-Forward
+        interm = self.interm_af(self.interm_dense(attention_out))
+        layer_out = self.add_norm(attention_out, interm, self.out_dense, self.out_dropout, self.out_layer_norm)
+        return layer_out
+
+class SpanConvBlock(nn.Module):
+    """
+    Convolution Block used inside a ConvBERT Layer.
+
+    Layer Flow (Convolution Block):
+    Input -> Depthwise Conv1d -> Pointwise Conv1d -> GELU -> Pointwise Conv1d -> Dropout -> Output
+    """
+    def __init__(self, config):
+        super().__init__()
+        hidden = config.hidden_size
+        k = getattr(config, "conv_kernel_size", 7)
+        exp = getattr(config, "conv_expansion", 2)
+        p = k // 2
+        groups = getattr(config, "conv_groups", hidden)  # depthwise by default
+        self._expects_mask_4d = True  # helper for convenience
+
+        # Depthwise + Pointwise (1x1) convs
+        self.dw = nn.Conv1d(hidden, hidden, kernel_size=k, padding=p, groups=groups, bias=True)
+        self.pw1 = nn.Conv1d(hidden, hidden * exp, kernel_size=1)
+        self.act = nn.GELU()
+        self.pw2 = nn.Conv1d(hidden * exp, hidden, kernel_size=1)
+        self.dropout = nn.Dropout(getattr(config, "conv_dropout_prob", getattr(config, "hidden_dropout_prob", 0.1)))
+
+    @staticmethod
+    def _binary_seq_mask(attention_mask: torch.Tensor) -> torch.Tensor:
+        """
+        Converts attention_mask to [bs, seq] with 1 for tokens, 0 for padding.
+        Accepts masks in shapes [bs, seq] (1/0) or extended [bs,1,1,seq] (0 or -inf-like for pads).
+        """
+        if attention_mask is None:
+            return None
+        if attention_mask.dim() == 2:
+            return attention_mask.to(dtype=torch.long)
+        # extended mask: tokens -> 0, pads -> negative large
+        # token mask = (mask == 0)
+        m = (attention_mask[:, 0, 0, :] == 0).to(dtype=torch.long)
+        return m
+
+    def forward(self, x, attention_mask=None):
+        # x: [bs, seq, hidden]
+        mask_1d = self._binary_seq_mask(attention_mask)  # [bs, seq] with 1 where token, 0 where pad
+        if mask_1d is not None:
+            mask_3d = mask_1d.unsqueeze(-1)  # [bs, seq, 1]
+            x = x * mask_3d
+
+        y = x.transpose(1, 2)          # [bs, hidden, seq]
+        y = self.dw(y)
+        y = self.pw1(y)
+        y = self.act(y)
+        y = self.pw2(y)
+        y = y.transpose(1, 2)          # [bs, seq, hidden]
+        y = self.dropout(y)
+
+        if mask_1d is not None:
+            y = y * mask_3d
+        return y
 
 
+class ConvBertLayer(nn.Module):
+    """
+    ConvBERT Layer.
+
+    Layer Flow (ConvBERT Layer):
+    Input -> Self-Attention Block -> Convolution Block -> Fusion (sum or concat+Linear) ->
+            Feed-Forward -> (Linear Transformation Layer + Dropout + Add&Norm)
+    """
+    def __init__(self, config):
+        super().__init__()
+        # Self-Attention block
+        self.self_attention = BertSelfAttention(config)
+        self.attention_dense = nn.Linear(config.hidden_size, config.hidden_size)  # Linear Transformation Layer
+        self.attention_layer_norm = nn.LayerNorm(config.hidden_size, eps=getattr(config, "layer_norm_eps", 1e-12))
+        self.attention_dropout = nn.Dropout(getattr(config, "hidden_dropout_prob", 0.1))
+
+        # Convolution block
+        self.span_conv = SpanConvBlock(config)
+
+        # Fusion
+        fuse = getattr(config, "conv_fuse", "sum")
+        self.fuse_mode = fuse
+        if fuse == "concat":
+            self.fuse_linear = nn.Linear(2 * config.hidden_size, config.hidden_size)  # Linear Transformation Layer
+
+        # Feed-Forward block
+        self.interm_dense = nn.Linear(config.hidden_size, config.intermediate_size)  # Linear Transformation Layer
+        self.interm_af = F.gelu
+        self.out_dense = nn.Linear(config.intermediate_size, config.hidden_size)    # Linear Transformation Layer
+        self.out_layer_norm = nn.LayerNorm(config.hidden_size, eps=getattr(config, "layer_norm_eps", 1e-12))
+        self.out_dropout = nn.Dropout(getattr(config, "hidden_dropout_prob", 0.1))
+
+    def _merge_heads(self, attn_value, bs, seq_len, hidden_size):
+        return attn_value.transpose(1, 2).contiguous().view(bs, seq_len, hidden_size)
+
+    def add_norm(self, residual_input, sublayer_out, dense_layer, dropout, ln_layer):
+        transformed = dense_layer(sublayer_out)
+        dropped = dropout(transformed)
+        return ln_layer(residual_input + dropped)
+
+    def forward(self, hidden_states, attention_mask):
+        bs, seq_len, hidden_size = hidden_states.size()
+
+        # --- Self-Attention Block (with Add&Norm) ---
+        attn_value = self.self_attention(hidden_states, attention_mask)                     # [bs, heads, seq, head_dim]
+        attn_value = self._merge_heads(attn_value, bs, seq_len, hidden_size)               # [bs, seq, hidden]
+        attn_out = self.add_norm(hidden_states, attn_value,
+                                 self.attention_dense, self.attention_dropout, self.attention_layer_norm)
+
+        # --- Convolution Block ---
+        conv_out = self.span_conv(hidden_states, attention_mask)                            # [bs, seq, hidden]
+
+        # --- Fusion ---
+        if self.fuse_mode == "concat":
+            mixed = torch.cat([attn_out, conv_out], dim=-1)                                 # [bs, seq, 2*hidden]
+            mixed = self.fuse_linear(mixed)                                                 # Linear Transformation Layer
+        else:
+            mixed = attn_out + conv_out                                                     # sum
+
+        # --- Feed-Forward + Add&Norm ---
+        interm = self.interm_af(self.interm_dense(mixed))
+        layer_out = self.add_norm(mixed, interm, self.out_dense, self.out_dropout, self.out_layer_norm)
+        return layer_out
+
+class BertModel(BertPreTrainedModel):
+    """
+    The (Conv)BERT model returns final embeddings for each token in a sentence.
+
+    Layer Flow (Model):
+    Embed Layer -> a stack of N BERT Layers (BertLayer or ConvBertLayer) -> Pooler (Linear Transformation Layer + Tanh).
+    """
+    def __init__(self, config):
+        super().__init__(config)
+        self.config = config
+
+        # ---- Embed Layer ----
+        self.word_embedding = nn.Embedding(config.vocab_size, config.hidden_size, padding_idx=config.pad_token_id)
+        self.pos_embedding = nn.Embedding(config.max_position_embeddings, config.hidden_size)
+        self.tk_type_embedding = nn.Embedding(config.type_vocab_size, config.hidden_size)
+        self.embed_layer_norm = nn.LayerNorm(config.hidden_size, eps=getattr(config, "layer_norm_eps", 1e-12))
+        self.embed_dropout = nn.Dropout(getattr(config, "hidden_dropout_prob", 0.1))
+        position_ids = torch.arange(config.max_position_embeddings).unsqueeze(0)
+        self.register_buffer("position_ids", position_ids)
+
+        # ---- Encoder: stack of BERT Layers ----
+        use_conv = getattr(config, "use_convbert", True)  # default to True for this module
+        LayerCls = ConvBertLayer if use_conv else BertLayer
+        self.bert_layers = nn.ModuleList([LayerCls(config) for _ in range(config.num_hidden_layers)])
+
+        # ---- Pooler for [CLS] token ----
+        self.pooler_dense = nn.Linear(config.hidden_size, config.hidden_size)  # Linear Transformation Layer
+        self.pooler_af = nn.Tanh()
+
+        self.init_weights()
+
+    # ---- Embed Layer ----
+    def embed(self, input_ids):
+        input_shape = input_ids.size()
+        seq_length = input_shape[1]
+
+        # word embeddings
+        inputs_embeds = self.word_embedding(input_ids)  # [bs, seq, hidden]
+
+        # positional embeddings
+        pos_ids = self.position_ids[:, :seq_length].expand(input_shape)  # [bs, seq]
+        pos_embeds = self.pos_embedding(pos_ids)  # [bs, seq, hidden]
+
+        # token type embeddings (set to zeros if caller doesn't supply)
+        token_type_ids = torch.zeros_like(input_ids, dtype=torch.long)
+        tok_type_embeds = self.tk_type_embedding(token_type_ids)
+
+        # sum & norm & dropout
+        embeddings = inputs_embeds + pos_embeds + tok_type_embeds
+        embeddings = self.embed_layer_norm(embeddings)
+        embeddings = self.embed_dropout(embeddings)
+        return embeddings
+
+    # ---- Encoder ----
+    def encode(self, hidden_states, attention_mask):
+        """
+        hidden_states: output from Embed Layer [bs, seq, hidden]
+        attention_mask: [bs, seq] with 1 for tokens, 0 for pads
+        """
+        # Extend attention mask for self-attention: [bs, 1, 1, seq]
+        extended_attention_mask: torch.Tensor = get_extended_attention_mask(attention_mask, self.dtype)
+
+        # pass through BERT Layers
+        for _, layer_module in enumerate(self.bert_layers):
+            hidden_states = layer_module(hidden_states, extended_attention_mask)
+        return hidden_states
+
+    # ---- Forward ----
+    def forward(self, input_ids, attention_mask):
+        """
+        input_ids: [batch_size, seq_len]
+        attention_mask: [batch_size, seq_len] with 1 for tokens, 0 for pads
+        """
+        # Embed Layer
+        embedding_output = self.embed(input_ids=input_ids)
+
+        # Encoder (stack of BERT Layers / ConvBERT Layers)
+        sequence_output = self.encode(embedding_output, attention_mask=attention_mask)
+
+        # Pooler (Linear Transformation Layer + Tanh) applied to [CLS]
+        first_tk = sequence_output[:, 0]
+        first_tk = self.pooler_dense(first_tk)
+        first_tk = self.pooler_af(first_tk)
+
+        return {"last_hidden_state": sequence_output, "pooler_output": first_tk}
+
+# For convenience, keep a ConvBertModel alias that always uses ConvBertLayer
+class ConvBertModel(BertModel):
+    def __init__(self, config):
+        # Force conv usage
+        if not hasattr(config, "use_convbert"):
+            setattr(config, "use_convbert", True)
+        else:
+            config.use_convbert = True
+        super().__init__(config)
+
+__all__ = [
+    "BertModel",
+    "ConvBertModel",
+    "BertLayer",
+    "ConvBertLayer",
+    "SpanConvBlock",
+    "BertSelfAttention",
+]

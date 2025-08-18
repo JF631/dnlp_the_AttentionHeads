@@ -5,7 +5,7 @@ from bert import BertModel
 from tokenizer import BertTokenizer
 
 
-class TestBERTModel():
+class TestconvBERTModel():
     input_ids = torch.tensor([])
     input_mask = torch.tensor([])
 
