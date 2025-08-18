@@ -73,10 +73,10 @@ class MultitaskBERT(nn.Module):
         self.sentiment_classifier = nn.Linear(config.hidden_size, N_SENTIMENT_CLASSES)
         self.sts_regressor = nn.Linear(self.bert.config.hidden_size * 2, 1)
 
-        # Input is 2 * 768 (two sentance embeddings), output is 1 since it is single 0/1 (yes/no)
-        self.paraphrase_classifier = nn.Linear(2 * BERT_HIDDEN_SIZE, 1)
+        # Input is 768 (embedding for both sentences), output is 1 since it is single 0/1 (yes/no)
+        self.paraphrase_classifier = nn.Linear(BERT_HIDDEN_SIZE, 1)
 
-    def forward(self, input_ids, attention_mask):
+    def forward(self, input_ids, attention_mask, token_type_ids=None):
         """Takes a batch of sentences and produces embeddings for them."""
 
         # The final BERT embedding is the hidden state of [CLS] token (the first token).
@@ -84,7 +84,7 @@ class MultitaskBERT(nn.Module):
         # Here, you can start by just returning the embeddings straight from BERT.
         # When thinking of improvements, you can later try modifying this
         # (e.g., by adding other layers).
-        bert_output = self.bert(input_ids, attention_mask)
+        bert_output = self.bert(input_ids, attention_mask, token_type_ids)
         return bert_output['pooler_output']
 
     def predict_sentiment(self, input_ids, attention_mask):
@@ -103,22 +103,19 @@ class MultitaskBERT(nn.Module):
 
         return logits
 
-    def predict_paraphrase(self, input_ids_1, attention_mask_1, input_ids_2, attention_mask_2):
+    def predict_paraphrase(self, input_ids, attention_mask, token_type_ids):
         """
         Given a batch of pairs of sentences, outputs a single logit for predicting whether they are paraphrases.
         Note that your output should be unnormalized (a logit); it will be passed to the sigmoid function
         during evaluation, and handled as a logit by the appropriate loss function.
         Dataset: Quora
         """
-        # Embeddings for each sentences
-        emb1 = self.forward(input_ids_1, attention_mask_1)
-        emb2 = self.forward(input_ids_2, attention_mask_2)
 
-        # Combine embeddings
-        combined_emb = torch.cat((emb1, emb2), dim=1)
+        # Embedding for combined sentences sperated by [SEP}
+        emb = self.forward(input_ids, attention_mask, token_type_ids)
 
         # Apply dropout
-        dropped_emb = self.dropout(combined_emb)
+        dropped_emb = self.dropout(emb)
 
         # Make prediction
         logits = self.paraphrase_classifier(dropped_emb)
@@ -319,16 +316,15 @@ def train_multitask(args):
             # Trains the model on the qqp dataset
             for batch in tqdm(quora_train_dataloader, desc=f"train-{epoch + 1:02}", disable=TQDM_DISABLE):
                 # Move batch to device
-                b_ids1, b_mask1, \
-                    b_ids2, b_mask2, \
-                    b_labels = (
-                    batch['token_ids_1'].to(device), batch['attention_mask_1'].to(device),
-                    batch['token_ids_2'].to(device), batch['attention_mask_2'].to(device),
-                    batch['labels'].to(device)
+                b_ids, b_mask, b_token_types, b_labels = (
+                    batch["token_ids"].to(device),
+                    batch["attention_mask"].to(device),
+                    batch["token_type_ids"].to(device),
+                    batch["labels"].to(device)
                 )
 
                 optimizer.zero_grad()
-                logits = model.predict_paraphrase(b_ids1, b_mask1, b_ids2, b_mask2)
+                logits = model.predict_paraphrase(b_ids, b_mask, b_token_types)
 
                 loss = F.binary_cross_entropy_with_logits(logits, b_labels.float().view(-1))
                 loss.backward()

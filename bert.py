@@ -199,7 +199,7 @@ class BertModel(BertPreTrainedModel):
 
         self.init_weights()
 
-    def embed(self, input_ids):
+    def embed(self, input_ids, token_type_ids=None):
         input_shape = input_ids.size()
         seq_length = input_shape[1]
 
@@ -218,10 +218,10 @@ class BertModel(BertPreTrainedModel):
         # raise NotImplementedError
         pos_embeds = self.pos_embedding(pos_ids)    # shape: [batch_size, seq_length, hidden_size]
 
-        # Get token type ids, since we are not considering token type,
-        # this is just a placeholder.
-        tk_type_ids = torch.zeros(input_shape, dtype=torch.long, device=input_ids.device)
-        tk_type_embeds = self.tk_type_embedding(tk_type_ids)
+        # If no token_type_ids are given, keep using zeros placeholder
+        if token_type_ids is None:
+            token_type_ids = torch.zeros(input_shape, dtype=torch.long, device=input_ids.device)
+        tk_type_embeds = self.tk_type_embedding(token_type_ids)
 
         ### TODO
         # raise NotImplementedError
@@ -251,13 +251,13 @@ class BertModel(BertPreTrainedModel):
 
         return hidden_states
 
-    def forward(self, input_ids, attention_mask):
+    def forward(self, input_ids, attention_mask, token_type_ids=None):
         """
         input_ids: [batch_size, seq_len], seq_len is the max length of the batch
         attention_mask: same size as input_ids, 1 represents non-padding tokens, 0 represents padding tokens
         """
         # get the embedding for each input token
-        embedding_output = self.embed(input_ids=input_ids)
+        embedding_output = self.embed(input_ids=input_ids, token_type_ids=token_type_ids)
 
         # feed to a transformer (a stack of BertLayers)
         sequence_output = self.encode(embedding_output, attention_mask=attention_mask)
