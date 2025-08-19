@@ -76,6 +76,9 @@ class MultitaskBERT(nn.Module):
 
         # Input is 2 * 768 (two sentance embeddings), output is 1 since it is single 0/1 (yes/no)
         self.paraphrase_classifier = nn.Linear(2 * BERT_HIDDEN_SIZE, 1)
+        # ETPC paraphrase type detection head (7 binary labels, multi-label)
+        self.paraphrase_types_classifier = nn.Linear(2 * BERT_HIDDEN_SIZE, 7)
+
 
     def forward(self, input_ids, attention_mask):
         """Takes a batch of sentences and produces embeddings for them."""
@@ -142,18 +145,19 @@ class MultitaskBERT(nn.Module):
         return similarity.view(-1)  # ?
 
 
-def predict_paraphrase_types(
+    def predict_paraphrase_types(
             self, input_ids_1, attention_mask_1, input_ids_2, attention_mask_2
-    ):
-        """
-        Given a batch of pairs of sentences, outputs logits for detecting the paraphrase types.
-        There are 7 different types of paraphrases.
-        Thus, your output should contain 7 unnormalized logits for each sentence. It will be passed to the sigmoid function
-        during evaluation, and handled as a logit by the appropriate loss function.
-        Dataset: ETPC
-        """
-        ### TODO
-        raise NotImplementedError
+        ):
+            """
+            Given a batch of pairs of sentences, outputs 7 unnormalized logit
+            (multi-label) for ETPC paraphrase type detection.
+            """
+            emb1 = self.forward(input_ids_1, attention_mask_1)
+            emb2 = self.forward(input_ids_2, attention_mask_2)
+            combined_emb = torch.cat((emb1, emb2), dim=1)
+            dropped_emb = self.dropout(combined_emb)
+            logits = self.paraphrase_types_classifier(dropped_emb)
+            return logits
 
 
 def save_model(model, optimizer, args, config, filepath):
@@ -170,8 +174,6 @@ def save_model(model, optimizer, args, config, filepath):
     torch.save(save_info, filepath)
     print(f"Saving the model to {filepath}.")
 
-
-# TODO Currently only trains on SST dataset!
 def train_multitask(args):
     device = torch.device("cuda") if args.use_gpu else torch.device("cpu")
     # Load data
@@ -180,7 +182,7 @@ def train_multitask(args):
         args.sst_train, args.quora_train, args.sts_train, args.etpc_train, split="train"
     )
     sst_dev_data, _, quora_dev_data, sts_dev_data, etpc_dev_data = load_multitask_data(
-        args.sst_dev, args.quora_dev, args.sts_dev, args.etpc_dev, split="train"
+        args.sst_dev, args.quora_dev, args.sts_dev, args.etpc_dev, split="dev"
     )
 
     sst_train_dataloader = None
@@ -210,10 +212,6 @@ def train_multitask(args):
             collate_fn=sst_dev_data.collate_fn,
         )
 
-    ### TODO
-    #   Load data for the other datasets
-    # If you are doing the paraphrase type detection with the minBERT model as well, make sure
-    # to transform the the data labels into binaries (as required in the bart_detection.py script)
     # STS dataset
     if args.task in ("sts", "multitask"):
         sts_train_data = SentencePairDataset(sts_train_data, args)
@@ -225,6 +223,7 @@ def train_multitask(args):
         sts_dev_dataloader = DataLoader(
             sts_dev_data, shuffle=False, batch_size=args.batch_size, collate_fn=sts_dev_data.collate_fn
         )
+
     # QQP dataset
     if args.task == "qqp" or args.task == "multitask":
         quora_train_data = SentencePairDataset(quora_train_data, args)
@@ -339,9 +338,22 @@ def train_multitask(args):
                 num_batches += 1
 
         if args.task == "etpc" or args.task == "multitask":
-            # Trains the model on the etpc dataset
-            ### TODO
-            raise NotImplementedError
+            # Train on ETPC (7-label multi-label classification)
+            for batch in tqdm(etpc_train_dataloader, desc=f"train-{epoch + 1:02}-etpc", disable=TQDM_DISABLE):
+                b_ids1 = batch["token_ids_1"].to(device)
+                b_mask1 = batch["attention_mask_1"].to(device)
+                b_ids2 = batch["token_ids_2"].to(device)
+                b_mask2 = batch["attention_mask_2"].to(device)
+                b_labels = batch["labels"].to(device).float()  # shape [B,7]
+
+                optimizer.zero_grad()
+                logits = model.predict_paraphrase_types(b_ids1, b_mask1, b_ids2, b_mask2)  # [B,7]
+                loss = F.binary_cross_entropy_with_logits(logits, b_labels)
+                loss.backward()
+                optimizer.step()
+
+                train_loss += loss.item()
+                num_batches += 1
 
         train_loss = train_loss / num_batches
 
@@ -369,13 +381,40 @@ def train_multitask(args):
             )
         )
 
-        train_acc, dev_acc = {
-            "sst": (sst_train_acc, sst_dev_acc),
-            "sts": (sts_train_corr, sts_dev_corr),
-            "qqp": (quora_train_acc, quora_dev_acc),
-            "etpc": (etpc_train_acc, etpc_dev_acc),
-            "multitask": (0, 0),  # TODO
-        }[args.task]
+        # === Aggregate metrics selection (replace your current mapping block with this) ===
+        if args.task == "multitask":
+            # Build an aggregate metric across available tasks
+            dev_parts = []
+            train_parts = []
+
+            if sst_dev_dataloader is not None:
+                dev_parts.append(sst_dev_acc)  # accuracy in [0,1]
+                train_parts.append(sst_train_acc)
+
+            if quora_dev_dataloader is not None:
+                dev_parts.append(quora_dev_acc)  # accuracy in [0,1]
+                train_parts.append(quora_train_acc)
+
+            if etpc_dev_dataloader is not None:
+                dev_parts.append(etpc_dev_acc)  # accuracy/F1 per your evaluator
+                train_parts.append(etpc_train_acc)
+
+            if sts_dev_dataloader is not None:
+                # If Spearman is in [-1,1], map to [0,1] so it’s comparable
+                dev_parts.append((sts_dev_corr + 1.0) / 2.0)
+                train_parts.append((sts_train_corr + 1.0) / 2.0)
+
+            train_acc = sum(train_parts) / len(train_parts) if train_parts else 0.0
+            dev_acc = sum(dev_parts) / len(dev_parts) if dev_parts else 0.0
+
+        else:
+            # Single-task metrics
+            train_acc, dev_acc = {
+                "sst": (sst_train_acc, sst_dev_acc),
+                "sts": (sts_train_corr, sts_dev_corr),
+                "qqp": (quora_train_acc, quora_dev_acc),
+                "etpc": (etpc_train_acc, etpc_dev_acc),
+            }[args.task]
 
         print(
             f"Epoch {epoch + 1:02} ({args.task}): train loss :: {train_loss:.3f}, train :: {train_acc:.3f}, dev :: {dev_acc:.3f}"
