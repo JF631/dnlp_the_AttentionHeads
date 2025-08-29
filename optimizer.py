@@ -25,7 +25,7 @@ class AdamW(Optimizer):
             raise ValueError(
                 "Invalid beta parameter: {} - should be in [0.0, 1.0[".format(betas[1])
             )
-        if not 0.0 <= eps:
+        if 0.0 > eps:
             raise ValueError("Invalid epsilon value: {} - should be >= 0.0".format(eps))
         defaults = dict(
             lr=lr, betas=betas, eps=eps, weight_decay=weight_decay, correct_bias=correct_bias
@@ -85,9 +85,6 @@ class AdamW(Optimizer):
                 if group["weight_decay"] != 0:
                     p.data.add_(p.data, alpha=-alpha * group["weight_decay"])
 
-
-
-
                 # mt = (mt * beta1) + (1 - beta1) * grad
                 mt.mul_(beta1).add_(grad, alpha=(1 - beta1))
                 # vt = (vt * beta2) + (1 - beta2) * grad * grad
@@ -100,27 +97,4 @@ class AdamW(Optimizer):
 
                 if group["weight_decay"] != 0:
                     p.data.add_(p.data, alpha=-alpha * group["weight_decay"])
-
-
-
-
-                # Complete the implementation of AdamW here, reading and saving
-                # your state in the `state` dictionary above.
-                # The hyperparameters can be read from the `group` dictionary
-                # (they are lr, betas, eps, weight_decay, and correct_bias, as saved in
-                # the constructor).
-                #
-                # 1- Update first and second moments of the gradients.
-                # 2- Apply bias correction.
-                #    (using the "efficient version" given in https://arxiv.org/abs/1412.6980;
-                #     also given as the pseudo-code in the project description).
-                # 3- Update parameters (p.data).
-                # 4- After that main gradient-based update, update again using weight decay
-                #    (incorporating the learning rate again).
-
-                ### TODO DONE
-                # raise NotImplementedError
-                ### TODO DONE
-                # raise NotImplementedError
-
         return loss
