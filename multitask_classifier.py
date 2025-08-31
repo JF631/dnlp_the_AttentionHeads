@@ -14,12 +14,15 @@ from torch import nn
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from convBert import BertModel
+from bert import BertModel
+from convBert import BertModel as convBertModel
+from simBert import BertModel as simBertModel
 from datasets import (
     SentenceClassificationDataset,
     SentencePairDataset,
     load_multitask_data,
 )
+from buildSimBertFromHF import build_simbert_from_pretrained
 from evaluation import model_eval_multitask, test_model_multitask
 from optimizer import AdamW
 from pcgradOptimizer import PCGrad
@@ -58,9 +61,19 @@ class MultitaskBERT(nn.Module):
 
         # You will want to add layers here to perform the downstream tasks.
         # Pretrain mode does not require updating bert parameters.
-        self.bert = BertModel.from_pretrained(
+        # Choose which model to use
+        if args.model == 'bert':
+            self.bert = BertModel.from_pretrained(
             "bert-base-uncased", local_files_only=config.local_files_only
-        )
+            )
+        elif args.model == 'simBert':
+            self.bert = build_simbert_from_pretrained(
+                "bert-base-uncased", local_files_only=config.local_files_only
+            )
+        elif args.model == 'convBert':
+            self.bert = convBertModel.from_pretrained(
+                "bert-base-uncased", local_files_only=config.local_files_only
+            )
 
         for param in self.bert.parameters():
             if config.option == "pretrain":
@@ -508,12 +521,22 @@ def get_args():
         default="pretrain",
     )
 
+    # Optimizer Arguments
     parser.add_argument(
         "--optimizer",
         type=str,
         help="The optimizer to use for training",
         choices=["pcgrad", "gradvac"],
         default="",
+    )
+
+    # Model arguments
+    parser.add_argument(
+        "--model",
+        type=str,
+        help="The model to use",
+        choices=("bert", "convBert", "simBert"), # Either standard Bert, convolutional Bert or siamese Bert
+        default="bert"
     )
 
     parser.add_argument("--use_gpu", action="store_true")

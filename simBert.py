@@ -16,7 +16,7 @@ class BertSelfAttention(nn.Module):
         self.attention_head_size = int(config.hidden_size / config.num_attention_heads)
         self.all_head_size = self.num_attention_heads * self.attention_head_size
 
-        # initialize the linear transformation layers for key, value, query
+        # initialize the linear transformation layers for Key, value, Query
         self.query = nn.Linear(config.hidden_size, self.all_head_size)
         self.key = nn.Linear(config.hidden_size, self.all_head_size)
         self.value = nn.Linear(config.hidden_size, self.all_head_size)
@@ -103,7 +103,6 @@ class BertModel(BertPreTrainedModel):
         "pooler_output":     [bs, hidden]   (tanh on [CLS])
       }
     """
-
     def __init__(self, config):
         super().__init__(config)
         self.config = config
@@ -161,10 +160,6 @@ class BertModel(BertPreTrainedModel):
         return {"last_hidden_state": sequence_output, "pooler_output": first_tk}
 
 
-# =============================================================================
-# SBERT additions: pooling utilities + SimBertMultitask wrapper
-# =============================================================================
-
 N_SENTIMENT_CLASSES = 5
 N_ETPC_CLASSES = 7
 
@@ -188,17 +183,7 @@ def pair_features(u, v):
 class SimBertMultitask(nn.Module):
     """
     Siamese (SBERT-style) multitask model with a weight-tied encoder.
-    Uses the *local* BertModel defined above as the shared encoder.
-
-    Exposes the same task APIs your trainer expects:
-      - predict_sentiment(input_ids, attention_mask) -> logits [B,5]
-      - predict_paraphrase(ids1, m1, ids2, m2)      -> logit  [B]
-      - predict_similarity(ids1, m1, ids2, m2)      -> score in [0,5] [B]
-      - predict_paraphrase_types(ids1, m1, ids2, m2)-> logits [B,7]
-
-    Config expects:
-      - hidden_dropout_prob, hidden_size, option
-      - sim_pool in {"mean","max","cls"} (default "mean")
+    Uses the local BertModel defined above as the shared encoder.
     """
     def __init__(self, config):
         super().__init__()
@@ -215,7 +200,6 @@ class SimBertMultitask(nn.Module):
         self.qqp_head  = nn.Linear(3 * self.hidden_size, 1)              # binary paraphrase
         self.etpc_head = nn.Linear(3 * self.hidden_size, N_ETPC_CLASSES) # 7-label multilabel
 
-    # -------- sentence embedding (pooling over encoder outputs) --------
     def sentence_embed(self, input_ids, attention_mask):
         out = self.encoder(input_ids, attention_mask)
         if self.sim_pool == "cls":
@@ -226,7 +210,6 @@ class SimBertMultitask(nn.Module):
             emb = mean_pool(out["last_hidden_state"], attention_mask) # [B,H]
         return emb
 
-    # -------- task APIs --------
     def predict_sentiment(self, input_ids, attention_mask):
         u = self.sentence_embed(input_ids, attention_mask)  # [B,H]
         u = self.dropout(u)
