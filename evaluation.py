@@ -171,7 +171,6 @@ def model_eval_multitask(
                 int
             )
             etpc_accuracy = np.mean(correct_pred)
-            etpc_y_pred = etpc_y_pred.tolist()
         else:
             etpc_accuracy = None
 
@@ -279,15 +278,19 @@ def model_eval_test_multitask(
                 sst_y_pred.extend(y_hat)
                 sst_sent_ids.extend(b_sent_ids)
 
+        etpc_y_true = []
         etpc_y_pred = []
         etpc_sent_ids = []
+
+        # Evaluate paraphrase type detection (multi-label, 7 dims).
         if task == "etpc" or task == "multitask":
             for step, batch in enumerate(tqdm(etpc_dataloader, desc="eval", disable=TQDM_DISABLE)):
-                (b_ids1, b_mask1, b_ids2, b_mask2, b_sent_ids) = (
+                (b_ids1, b_mask1, b_ids2, b_mask2, b_labels, b_sent_ids) = (
                     batch["token_ids_1"],
                     batch["attention_mask_1"],
                     batch["token_ids_2"],
                     batch["attention_mask_2"],
+                    batch["labels"],
                     batch["sent_ids"],
                 )
 
@@ -297,10 +300,22 @@ def model_eval_test_multitask(
                 b_mask2 = b_mask2.to(device)
 
                 logits = model.predict_paraphrase_types(b_ids1, b_mask1, b_ids2, b_mask2)
-                y_hat = logits.sigmoid().round().cpu().numpy().astype(int).tolist()
+
+                # Cast predictions and labels to Python lists of ints (shape [B, 7]).
+                y_hat = logits.sigmoid().round().to(torch.int).cpu().tolist()
+                y_true = b_labels.round().to(torch.int).cpu().tolist()
 
                 etpc_y_pred.extend(y_hat)
+                etpc_y_true.extend(y_true)
                 etpc_sent_ids.extend(b_sent_ids)
+
+        if task == "etpc" or task == "multitask":
+            pred_arr = np.array(etpc_y_pred, dtype=int)
+            true_arr = np.array(etpc_y_true, dtype=int)
+            correct_pred = np.all(pred_arr == true_arr, axis=1).astype(int)
+            etpc_accuracy = float(np.mean(correct_pred))
+        else:
+            etpc_accuracy = None
 
         return (
             quora_y_pred,
