@@ -23,6 +23,8 @@ from datasets import (
 from evaluation import model_eval_multitask, test_model_multitask
 from optimizer import AdamW
 
+from qqp_utils import pos_weight_from_labels, smooth_targets
+
 TQDM_DISABLE = False
 
 
@@ -179,6 +181,18 @@ def train_multitask(args):
         args.sst_dev, args.quora_dev, args.sts_dev, args.etpc_dev, split="train"
     )
 
+    qqp_pos_weight = None
+    if args.task == "qqp" or args.task == "multitask":
+        try:
+            #quora_train_data: sent1, sent2, label_int, sent_id
+            train_labels = [int(rec[2]) for rec in quora_train_data]
+            qqp_pos_weight = pos_weight_from_labels(train_labels).to(device)
+            print(f"QQP pos_weight = {qqp_pos_weight.item():.3f}")
+        except Exception as e:
+            print(f"##### Could not compute pos_weight for QQP: {e}")
+            qqp_pos_weight = None
+
+
     sst_train_dataloader = None
     sst_dev_dataloader = None
     quora_train_dataloader = None
@@ -330,7 +344,16 @@ def train_multitask(args):
                 optimizer.zero_grad()
                 logits = model.predict_paraphrase(b_ids, b_mask, b_token_types)
 
-                loss = F.binary_cross_entropy_with_logits(logits, b_labels.float().view(-1))
+                # Label smoothing
+                y = b_labels.float().view(-1)
+                y_smooth = smooth_targets(y, eps=0.05)
+
+                # Use pos_weight
+                if qqp_pos_weight is not None:
+                    loss = F.binary_cross_entropy_with_logits(logits, y_smooth, pos_weight=qqp_pos_weight)
+                else:
+                    loss = F.binary_cross_entropy_with_logits(logits, y_smooth)
+
                 loss.backward()
                 optimizer.step()
 
@@ -380,8 +403,14 @@ def train_multitask(args):
             f"Epoch {epoch + 1:02} ({args.task}): train loss :: {train_loss:.3f}, train :: {train_acc:.3f}, dev :: {dev_acc:.3f}"
         )
 
-        if dev_acc > best_dev_acc:
-            best_dev_acc = dev_acc
+        # This will probably cause merge conflicts
+        dev_metric_for_es = dev_acc  # acc as default for other tasks
+        if args.task in ("qqp", "multitask"):
+            # use F1 for QQP
+            dev_metric_for_es = quora_dev_f1
+
+        if dev_metric_for_es > best_dev_acc:
+            best_dev_acc = dev_metric_for_es
             save_model(model, optimizer, args, config, args.filepath)
             patience_counter = 0
         else:
