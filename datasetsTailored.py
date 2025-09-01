@@ -200,6 +200,11 @@ class SentencePairDataset(Dataset):
         self.dataset = dataset
         self.p = args
         self.isRegression = isRegression
+        self.has_labels = (
+                len(self.dataset) > 0
+                and len(self.dataset[0]) >= 4
+                and not isinstance(self.dataset[0][2], str)
+        )
         self.tokenizer = BertTokenizer.from_pretrained(
             "bert-base-uncased", local_files_only=args.local_files_only
         )
@@ -214,9 +219,8 @@ class SentencePairDataset(Dataset):
         sent1 = [x[0] for x in data]
         sent2 = [x[1] for x in data]
 
-        # Accept both (s1, s2, label/s, sent_id) and (s1, s2, sent_id)
-        has_labels = len(data[0]) >= 4 and not isinstance(data[0][2], str)
-        if has_labels:
+        # Accept both (s1, s2, label(s), sent_id) and (s1, s2, sent_id)
+        if self.has_labels:
             labels = [x[2] for x in data]  # could be scalar or list (multi-label)
             sent_ids = [x[3] for x in data]
         else:
