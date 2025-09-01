@@ -38,7 +38,6 @@ def model_eval_multitask(
     model.eval()  # switch to eval model, will turn off randomness like dropout
 
     with torch.no_grad():
-        # Detect whether ETPC split is labeled; relies on SentencePairDataset.has_labels
         etpc_has_labels = getattr(getattr(etpc_dataloader, "dataset", None), "has_labels", True)
 
         quora_y_true = []
@@ -143,9 +142,8 @@ def model_eval_multitask(
         etpc_y_true = []
         etpc_y_pred = []
         etpc_sent_ids = []
-        etpc_true_sum = 0  # total number of positive labels across the set
 
-        # Evaluate paraphrase type detection (multi-label, 7 dims).
+        # Evaluate paraphrase type detection.
         if task == "etpc" or task == "multitask":
             for step, batch in enumerate(tqdm(etpc_dataloader, desc="eval", disable=TQDM_DISABLE)):
                 (b_ids1, b_mask1, b_ids2, b_mask2, b_labels, b_sent_ids) = (
@@ -163,24 +161,18 @@ def model_eval_multitask(
                 b_mask2 = b_mask2.to(device)
 
                 logits = model.predict_paraphrase_types(b_ids1, b_mask1, b_ids2, b_mask2)
-                y_hat = logits.sigmoid().round().to(torch.int).cpu().numpy()
+                y_hat = logits.sigmoid().round().cpu().numpy()
+                b_labels = b_labels.cpu().numpy()
+
                 etpc_y_pred.extend(y_hat)
+                etpc_y_true.extend(b_labels)
                 etpc_sent_ids.extend(b_sent_ids)
 
-                if etpc_has_labels:
-                    b_labels = b_labels.round().to(torch.int).cpu().numpy()
-                    etpc_y_true.extend(b_labels)
-                    etpc_true_sum += b_labels.sum()
-
         if task == "etpc" or task == "multitask":
-            # Treat all-zero labels as "unlabeled" to avoid trivial 1.0 accuracies.
-            if etpc_has_labels and len(etpc_y_true) > 0 and etpc_true_sum > 0:
-                pred_arr = np.array(etpc_y_pred, dtype=int)
-                true_arr = np.array(etpc_y_true, dtype=int)
-                correct_pred = np.all(pred_arr == true_arr, axis=1).astype(int)
-                etpc_accuracy = float(np.mean(correct_pred))
-            else:
-                etpc_accuracy = None
+            correct_pred = np.all(np.array(etpc_y_pred) == np.array(etpc_y_true), axis=1).astype(
+                int
+            )
+            etpc_accuracy = np.mean(correct_pred)
         else:
             etpc_accuracy = None
 
@@ -191,10 +183,7 @@ def model_eval_multitask(
         if task == "sts" or task == "multitask":
             print(f"Semantic Textual Similarity correlation: {sts_corr:.3f}")
         if task == "etpc" or task == "multitask":
-            if etpc_accuracy is None:
-                print("Paraphrase Type detection: unlabeled or empty-label set — skipping accuracy.")
-            else:
-                print(f"Paraphrase Type detection accuracy: {etpc_accuracy:.3f}")
+            print(f"Paraphrase Type detection accuracy: {etpc_accuracy:.3f}")
 
     model.train()  # switch back to train model
 
@@ -291,16 +280,19 @@ def model_eval_test_multitask(
                 sst_y_pred.extend(y_hat)
                 sst_sent_ids.extend(b_sent_ids)
 
+        etpc_y_true = []
         etpc_y_pred = []
         etpc_sent_ids = []
-        # Test splits are unlabeled; only produce predictions.
+
+        # Evaluate paraphrase type detection (multi-label, 7 dims).
         if task == "etpc" or task == "multitask":
             for step, batch in enumerate(tqdm(etpc_dataloader, desc="eval", disable=TQDM_DISABLE)):
-                (b_ids1, b_mask1, b_ids2, b_mask2, b_sent_ids) = (
+                (b_ids1, b_mask1, b_ids2, b_mask2, b_labels, b_sent_ids) = (
                     batch["token_ids_1"],
                     batch["attention_mask_1"],
                     batch["token_ids_2"],
                     batch["attention_mask_2"],
+                    batch["labels"],
                     batch["sent_ids"],
                 )
 
@@ -310,10 +302,22 @@ def model_eval_test_multitask(
                 b_mask2 = b_mask2.to(device)
 
                 logits = model.predict_paraphrase_types(b_ids1, b_mask1, b_ids2, b_mask2)
+
+                # Cast predictions and labels to Python lists of ints (shape [B, 7]).
                 y_hat = logits.sigmoid().round().to(torch.int).cpu().tolist()
+                y_true = b_labels.round().to(torch.int).cpu().tolist()
 
                 etpc_y_pred.extend(y_hat)
+                etpc_y_true.extend(y_true)
                 etpc_sent_ids.extend(b_sent_ids)
+
+        if task == "etpc" or task == "multitask":
+            pred_arr = np.array(etpc_y_pred, dtype=int)
+            true_arr = np.array(etpc_y_true, dtype=int)
+            correct_pred = np.all(pred_arr == true_arr, axis=1).astype(int)
+            etpc_accuracy = float(np.mean(correct_pred))
+        else:
+            etpc_accuracy = None
 
         return (
             quora_y_pred,
@@ -470,10 +474,7 @@ def test_model_multitask(args, model, device):
 
     if task == "etpc" or task == "multitask":
         with open(args.etpc_dev_out, "w+") as f:
-            if dev_etpc_accuracy is None:
-                print("dev etpc acc :: n/a (unlabeled or empty-label set)")
-            else:
-                print(f"dev etpc acc :: {dev_etpc_accuracy :.3f}")
+            print(f"dev etpc acc :: {dev_etpc_accuracy :.3f}")
             f.write("id,Predicted_Paraphrase_Types\n")
             for p, s in zip(dev_etpc_sent_ids, dev_etpc_y_pred):
                 f.write(f"{p}\t{s}\n")
