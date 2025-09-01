@@ -171,7 +171,6 @@ class BertModel(BertPreTrainedModel):
     2. a stack of n bert layers (used in self.encode)
     3. a linear transformation layer for [CLS] token (used in self.forward, as given)
     """
-
     def __init__(self, config):
         super().__init__(config)
         self.config = config

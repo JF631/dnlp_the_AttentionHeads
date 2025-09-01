@@ -366,7 +366,7 @@ class SimBertMultitask(nn.Module):
 
     Notes:
         - The encoder weights are shared by using a single ``BertModel`` instance.
-        - If ``config.option == 'finetune'``, encoder parameters are unfrozen.
+        - If ``config.option == 'fine-tune', encoder parameters are unfrozen.
     """
     def __init__(self, config):
         """
