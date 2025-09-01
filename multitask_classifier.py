@@ -344,7 +344,7 @@ def train_multitask(args):
 
         train_loss = train_loss / num_batches
 
-        quora_train_acc, _, _, sst_train_acc, _, _, sts_train_corr, _, _, etpc_train_acc, _, _ = (
+        quora_train_acc, quora_train_f1, _, _, sst_train_acc, _, _, sts_train_corr, _, _, etpc_train_acc, _, _ = (
             model_eval_multitask(
                 sst_train_dataloader,
                 quora_train_dataloader,
@@ -356,7 +356,7 @@ def train_multitask(args):
             )
         )
 
-        quora_dev_acc, _, _, sst_dev_acc, _, _, sts_dev_corr, _, _, etpc_dev_acc, _, _ = (
+        quora_dev_acc, quora_dev_f1, _, _, sst_dev_acc, _, _, sts_dev_corr, _, _, etpc_dev_acc, _, _ = (
             model_eval_multitask(
                 sst_dev_dataloader,
                 quora_dev_dataloader,
