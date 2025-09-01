@@ -237,7 +237,7 @@ def train_multitask(args):
         )
     # QQP dataset
     if args.task == "qqp" or args.task == "multitask":
-        quora_train_data = SentencePairDataset(quora_train_data, args)
+        quora_train_data = SentencePairDataset(quora_train_data, args, swap_prob=0.5)
         quora_dev_data = SentencePairDataset(quora_dev_data, args)
 
         quora_train_dataloader = DataLoader(

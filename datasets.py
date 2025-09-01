@@ -15,6 +15,8 @@ from torch.utils.data import Dataset
 
 from tokenizer import BertTokenizer
 
+import random
+
 
 def preprocess_string(s):
     return " ".join(
@@ -105,10 +107,11 @@ class SentenceClassificationTestDataset(Dataset):
 
 
 class SentencePairDataset(Dataset):
-    def __init__(self, dataset, args, isRegression=False):
+    def __init__(self, dataset, args, isRegression=False, swap_prob=0.0):
         self.dataset = dataset
         self.p = args
         self.isRegression = isRegression
+        self.swap_prob = swap_prob
         self.tokenizer = BertTokenizer.from_pretrained(
             "bert-base-uncased", local_files_only=args.local_files_only
         )
@@ -124,6 +127,12 @@ class SentencePairDataset(Dataset):
         sent2 = [x[1] for x in data]
         labels = [x[2] for x in data]
         sent_ids = [x[3] for x in data]
+
+        # QQP only, since STS isRegression = True (I think?)
+        if self.swap_prob > 0.0 and not self.isRegression:
+            for i in range(len(sent1)):
+                if random.random() < self.swap_prob:
+                    sent1[i], sent2[i] = sent2[i], sent1[i]
 
         encoding = self.tokenizer(sent1, sent2, return_tensors="pt", padding=True, truncation=True)
 
