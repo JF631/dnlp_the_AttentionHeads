@@ -342,7 +342,6 @@ def load_multitask_data(sst_filename, quora_filename, sts_filename, etpc_filenam
                         (
                             preprocess_string(record["sentence1"]),
                             preprocess_string(record["sentence2"]),
-                            list(map(int, record["paraphrase_type_ids"].strip("][").split(", "))),
                             sent_id,
                         )
                     )

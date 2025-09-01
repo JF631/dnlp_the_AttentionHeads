@@ -17,7 +17,7 @@ from tqdm import tqdm
 from bert import BertModel
 from convBert import BertModel as convBertModel
 from simBert import BertModel as simBertModel
-from datasets import (
+from datasetsTailored import (
     SentenceClassificationDataset,
     SentencePairDataset,
     load_multitask_data,
@@ -59,12 +59,10 @@ class MultitaskBERT(nn.Module):
     def __init__(self, config):
         super(MultitaskBERT, self).__init__()
 
-        # You will want to add layers here to perform the downstream tasks.
-        # Pretrain mode does not require updating bert parameters.
         # Choose which model to use
         if args.model == 'bert':
             self.bert = BertModel.from_pretrained(
-            "bert-base-uncased", local_files_only=config.local_files_only
+                "bert-base-uncased", local_files_only=config.local_files_only
             )
         elif args.model == 'simBert':
             self.bert = build_simbert_from_pretrained(
@@ -84,87 +82,46 @@ class MultitaskBERT(nn.Module):
         # General dropout layer using hidden_dropout_prob
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
 
-        # Sentiment classification layer
-        # This layer will be used for the SST dataset.
+        # Heads
         self.sentiment_classifier = nn.Linear(config.hidden_size, N_SENTIMENT_CLASSES)
         self.sts_regressor = nn.Linear(self.bert.config.hidden_size * 2, 1)
 
-        # Input is 2 * 768 (two sentance embeddings), output is 1 since it is single 0/1 (yes/no)
+        # Input is 2 * 768 (two sentence embeddings)
         self.paraphrase_classifier = nn.Linear(2 * BERT_HIDDEN_SIZE, 1)
         # ETPC paraphrase type detection head (7 binary labels, multi-label)
         self.paraphrase_types_classifier = nn.Linear(2 * BERT_HIDDEN_SIZE, 7)
 
     def forward(self, input_ids, attention_mask):
         """Takes a batch of sentences and produces embeddings for them."""
-
-        # The final BERT embedding is the hidden state of [CLS] token (the first token).
-        # See BertModel.forward() for more details.
-        # Here, you can start by just returning the embeddings straight from BERT.
-        # When thinking of improvements, you can later try modifying this
-        # (e.g., by adding other layers).
-        bert_output = self.bert(input_ids, attention_mask)
+        bert_output = self.bert(input_ids=input_ids, attention_mask=attention_mask)
         return bert_output['pooler_output']
 
     def predict_sentiment(self, input_ids, attention_mask):
-        """
-        Given a batch of sentences, outputs logits for classifying sentiment.
-        There are 5 sentiment classes:
-        (0 - negative, 1- somewhat negative, 2- neutral, 3- somewhat positive, 4- positive)
-        Thus, your output should contain 5 logits for each sentence.
-        Dataset: SST
-        """
         cls_embedding = self.forward(input_ids, attention_mask)
-
         logits_after_dropout = self.dropout(cls_embedding)
-
         logits = self.sentiment_classifier(logits_after_dropout)
-
         return logits
 
     def predict_paraphrase(self, input_ids_1, attention_mask_1, input_ids_2, attention_mask_2):
-        """
-        Given a batch of pairs of sentences, outputs a single logit for predicting whether they are paraphrases.
-        Note that your output should be unnormalized (a logit); it will be passed to the sigmoid function
-        during evaluation, and handled as a logit by the appropriate loss function.
-        Dataset: Quora
-        """
-        # Embeddings for each sentence
         emb1 = self.forward(input_ids_1, attention_mask_1)
         emb2 = self.forward(input_ids_2, attention_mask_2)
-
-        # Combine embeddings
         combined_emb = torch.cat((emb1, emb2), dim=1)
-
-        # Apply dropout
         dropped_emb = self.dropout(combined_emb)
-
-        # Make prediction
         logits = self.paraphrase_classifier(dropped_emb)
-
         return logits.squeeze(-1)
 
     def predict_similarity(self, input_ids_1, attention_mask_1, input_ids_2, attention_mask_2):
-        """
-        Given a batch of pairs of sentences, outputs a single logit corresponding to how similar they are.
-        Since the similarity label is a number in the interval [0,5], your output should be normalized to the interval [0,5];
-        it will be handled as a logit by the appropriate loss function.
-        Dataset: STS
-        """
-        cls_1 = self.forward(input_ids_1, attention_mask_1)  # ?
-        cls_2 = self.forward(input_ids_2, attention_mask_2)  # ?
-        combined = torch.cat([cls_1, cls_2], dim=1)  # ?
-        combined = self.dropout(combined)  # ?
-        similarity = self.sts_regressor(combined)  # ?
-        similarity = torch.sigmoid(similarity) * 5  # normalize to [0, 5] ?
-        return similarity.view(-1)  # ?
+        cls_1 = self.forward(input_ids_1, attention_mask_1)
+        cls_2 = self.forward(input_ids_2, attention_mask_2)
+        combined = torch.cat([cls_1, cls_2], dim=1)
+        combined = self.dropout(combined)
+        similarity = self.sts_regressor(combined)
+        similarity = torch.sigmoid(similarity) * 5  # normalize to [0, 5]
+        return similarity.view(-1)
 
     def predict_paraphrase_types(
-            self, input_ids_1, attention_mask_1, input_ids_2, attention_mask_2
+        self, input_ids_1, attention_mask_1, input_ids_2, attention_mask_2
     ):
-        """
-        Given a batch of pairs of sentences, outputs 7 unnormalized logit
-        (multi-label) for ETPC paraphrase type detection.
-        """
         emb1 = self.forward(input_ids_1, attention_mask_1)
         emb2 = self.forward(input_ids_2, attention_mask_2)
         combined_emb = torch.cat((emb1, emb2), dim=1)
@@ -257,6 +214,24 @@ def train_multitask(args):
             collate_fn=quora_dev_data.collate_fn
         )
 
+    # ETPC dataset  <<< ADDED
+    if args.task == "etpc" or args.task == "multitask":
+        etpc_train_data = SentencePairDataset(etpc_train_data, args)
+        etpc_dev_data = SentencePairDataset(etpc_dev_data, args)
+
+        etpc_train_dataloader = DataLoader(
+            etpc_train_data,
+            shuffle=True,
+            batch_size=args.batch_size,
+            collate_fn=etpc_train_data.collate_fn,
+        )
+        etpc_dev_dataloader = DataLoader(
+            etpc_dev_data,
+            shuffle=False,
+            batch_size=args.batch_size,
+            collate_fn=etpc_dev_data.collate_fn,
+        )
+
     # Init model
     config = {
         "hidden_dropout_prob": args.hidden_dropout_prob,
@@ -282,7 +257,7 @@ def train_multitask(args):
     optimizer = AdamW(model.parameters(), lr=lr)
 
     best_dev_acc = float("-inf")
-
+    print(f"Using {args.optimizer} optimizer for {args.task}.")
     # Run for the specified number of epochs
     for epoch in range(args.epochs):
         model.train()
@@ -291,9 +266,9 @@ def train_multitask(args):
 
         if args.task == "sst" or args.task == "multitask":
             # Train the model on the sst dataset.
-            print(f"Using {args.optimizer} optimizer for {args.task}.")
+
             for batch in tqdm(
-                    sst_train_dataloader, desc=f"train-{epoch + 1:02}", disable=TQDM_DISABLE
+                sst_train_dataloader, desc=f"train-{epoch + 1:02}", disable=TQDM_DISABLE
             ):
                 b_ids, b_mask, b_labels = (
                     batch["token_ids"],
@@ -313,8 +288,8 @@ def train_multitask(args):
                     pcg = PCGrad(optimizer)
                     pcg.pc_backward(loss)
                 elif args.optimizer == "gradvac":
-                   gv = GradVac(optimizer, reduction="sum", target=0.0, alpha=0.5)
-                   gv.gv_backward(loss)
+                    gv = GradVac(optimizer, reduction="sum", target=0.0, alpha=0.5)
+                    gv.gv_backward(loss)
                 else:
                     loss.backward()
 
@@ -341,7 +316,7 @@ def train_multitask(args):
                     gv = GradVac(optimizer, reduction="sum", target=0.0, alpha=0.5)
                     gv.gv_backward(loss)
                 else:
-                  loss.backward()
+                    loss.backward()
                 optimizer.step()
                 train_loss += loss.item()
                 num_batches += 1
@@ -350,9 +325,7 @@ def train_multitask(args):
             # Trains the model on the qqp dataset
             for batch in tqdm(quora_train_dataloader, desc=f"train-{epoch + 1:02}", disable=TQDM_DISABLE):
                 # Move batch to a device
-                b_ids1, b_mask1, \
-                    b_ids2, b_mask2, \
-                    b_labels = (
+                b_ids1, b_mask1, b_ids2, b_mask2, b_labels = (
                     batch['token_ids_1'].to(device), batch['attention_mask_1'].to(device),
                     batch['token_ids_2'].to(device), batch['attention_mask_2'].to(device),
                     batch['labels'].to(device)
@@ -360,14 +333,9 @@ def train_multitask(args):
 
                 optimizer.zero_grad()
                 logits = model.predict_paraphrase(b_ids1, b_mask1, b_ids2, b_mask2)
-
-                loss = F.binary_cross_entropy_with_logits(logits, b_labels.float().view(-1))
-                loss.backward()
-                optimizer.zero_grad()
-                logits = model.predict_paraphrase(b_ids1, b_mask1, b_ids2, b_mask2)
                 loss = F.binary_cross_entropy_with_logits(logits, b_labels.float().view(-1))
 
-                # Handling different optinizer
+                # Handling different optimizer
                 if args.optimizer == "pcgrad":
                     pcg = PCGrad(optimizer)
                     pcg.pc_backward(loss)
@@ -394,7 +362,7 @@ def train_multitask(args):
                 logits = model.predict_paraphrase_types(b_ids1, b_mask1, b_ids2, b_mask2)  # [B,7]
                 loss = F.binary_cross_entropy_with_logits(logits, b_labels)
 
-                # Hanlding different optimizer
+                # Handling different optimizer
                 if args.optimizer == "pcgrad":
                     print(f"Using {args.optimizer} for optimization")
                     pcg = PCGrad(optimizer)
@@ -435,9 +403,8 @@ def train_multitask(args):
             )
         )
 
-        # Aggregate metrics selection (replace your current mapping block with this) ===
+        # Aggregate metrics selection
         if args.task == "multitask":
-            # Build an aggregate metric across available tasks
             dev_parts = []
             train_parts = []
 
@@ -454,7 +421,7 @@ def train_multitask(args):
                 train_parts.append(etpc_train_acc)
 
             if sts_dev_dataloader is not None:
-                # If Spearman is in [-1,1], map to [0,1] so it’s comparable
+                # Map Spearman [-1,1] to [0,1] for comparability
                 dev_parts.append((sts_dev_corr + 1.0) / 2.0)
                 train_parts.append((sts_train_corr + 1.0) / 2.0)
 
@@ -478,9 +445,9 @@ def train_multitask(args):
             best_dev_acc = dev_acc
             save_model(model, optimizer, args, config, args.filepath)
 
-        # Error Handling for MultiTask Optimizers
-        if args.optimizer in ('pcgrad', 'gravac') and args.task != "multitask":
-            print(f"The Optimizer {optimizer} is only for multitasks.")
+        # Error Handling for MultiTask Optimizers (typo fixed)
+        if args.optimizer in ('pcgrad', 'gradvac') and args.task != "multitask":
+            print(f"The Optimizer {args.optimizer} is only for multitasks.")
             exit(1)
 
 
@@ -535,7 +502,7 @@ def get_args():
         "--model",
         type=str,
         help="The model to use",
-        choices=("bert", "convBert", "simBert"), # Either standard Bert, convolutional Bert or siamese Bert
+        choices=("bert", "convBert", "simBert"),  # Either standard Bert, convolutional Bert or siamese Bert
         default="bert"
     )
 
@@ -559,7 +526,7 @@ def get_args():
     # You should split the train data into a train and dev set first and change the
     # default path of the --etpc_dev argument to your dev set.
     parser.add_argument("--etpc_train", type=str, default="data/etpc-paraphrase-train.csv")
-    parser.add_argument("--etpc_dev", type=str, default="data/etpc-paraphrase-dev.csv")
+    parser.add_argument("--etpc_dev", type=str, default="data/etpc-paraphrase-detection-test-student.csv")
 
     parser.add_argument(
         "--etpc_test", type=str, default="data/etpc-paraphrase-detection-test-student.csv"
