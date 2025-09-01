@@ -143,6 +143,7 @@ def model_eval_multitask(
         etpc_y_true = []
         etpc_y_pred = []
         etpc_sent_ids = []
+        etpc_true_sum = 0  # total number of positive labels across the set
 
         # Evaluate paraphrase type detection (multi-label, 7 dims).
         if task == "etpc" or task == "multitask":
@@ -169,9 +170,11 @@ def model_eval_multitask(
                 if etpc_has_labels:
                     b_labels = b_labels.round().to(torch.int).cpu().numpy()
                     etpc_y_true.extend(b_labels)
+                    etpc_true_sum += b_labels.sum()
 
         if task == "etpc" or task == "multitask":
-            if etpc_has_labels and len(etpc_y_true) > 0:
+            # Treat all-zero labels as "unlabeled" to avoid trivial 1.0 accuracies.
+            if etpc_has_labels and len(etpc_y_true) > 0 and etpc_true_sum > 0:
                 pred_arr = np.array(etpc_y_pred, dtype=int)
                 true_arr = np.array(etpc_y_true, dtype=int)
                 correct_pred = np.all(pred_arr == true_arr, axis=1).astype(int)
@@ -189,7 +192,7 @@ def model_eval_multitask(
             print(f"Semantic Textual Similarity correlation: {sts_corr:.3f}")
         if task == "etpc" or task == "multitask":
             if etpc_accuracy is None:
-                print("Paraphrase Type detection: unlabeled set — skipping accuracy.")
+                print("Paraphrase Type detection: unlabeled or empty-label set — skipping accuracy.")
             else:
                 print(f"Paraphrase Type detection accuracy: {etpc_accuracy:.3f}")
 
@@ -468,7 +471,7 @@ def test_model_multitask(args, model, device):
     if task == "etpc" or task == "multitask":
         with open(args.etpc_dev_out, "w+") as f:
             if dev_etpc_accuracy is None:
-                print("dev etpc acc :: n/a (unlabeled)")
+                print("dev etpc acc :: n/a (unlabeled or empty-label set)")
             else:
                 print(f"dev etpc acc :: {dev_etpc_accuracy :.3f}")
             f.write("id,Predicted_Paraphrase_Types\n")
