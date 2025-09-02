@@ -23,7 +23,7 @@ from datasets import (
 from evaluation import model_eval_multitask, test_model_multitask
 from optimizer import AdamW
 
-from qqp_utils import pos_weight_from_labels, smooth_targets
+from qqp_utils import pos_weight_from_labels, smooth_targets, freeze_bert_bottom_k
 
 TQDM_DISABLE = False
 
@@ -294,6 +294,13 @@ def train_multitask(args):
         model.train()
         train_loss = 0
         num_batches = 0
+
+        # QQP only layer freezing with scheduling (6,4,0: acc:0.876, f1:0.846 with default settings)
+        if args.task == "qqp" and args.option == "finetune":
+            schedule = [6, 4, 2, 0]
+            k = schedule[epoch] if epoch < len(schedule) else 0
+            freeze_bert_bottom_k(model, k_layers=k)
+            print(f"### Layer Freezing: Epoch {epoch + 1}: froze bottom {k} layers")
 
         if args.task == "sst" or args.task == "multitask":
             # Train the model on the sst dataset.
