@@ -2,19 +2,12 @@
 
 """
 This module contains our Dataset classes and functions to load the 3 datasets we're using.
-
-You should only need to call load_multitask_data to get the training and dev examples
-to train your model.
 """
-
-
 import csv
-
 import torch
 from torch.utils.data import Dataset
 
 from tokenizer import BertTokenizer
-
 
 def preprocess_string(s):
     return " ".join(
@@ -342,7 +335,7 @@ def load_multitask_data(sst_filename, quora_filename, sts_filename, etpc_filenam
                         (
                             preprocess_string(record["sentence1"]),
                             preprocess_string(record["sentence2"]),
-                            list(map(int, record["paraphrase_type_ids"].strip("][").split(", "))),
+                            list(map(int, record["paraphrase_types"].strip("][").split(", "))),
                             sent_id,
                         )
                     )
