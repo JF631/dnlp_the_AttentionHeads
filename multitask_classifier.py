@@ -75,6 +75,9 @@ class MultitaskBERT(nn.Module):
         self.sentiment_classifier = nn.Linear(config.hidden_size, N_SENTIMENT_CLASSES)
         self.sts_regressor = nn.Linear(self.bert.config.hidden_size * 2, 1)
 
+        # QQP
+        self.paraphrase_ln = nn.LayerNorm(BERT_HIDDEN_SIZE)
+
         # Input is 768 (embedding for both sentences), output is 1 since it is single 0/1 (yes/no)
         self.paraphrase_classifier = nn.Linear(BERT_HIDDEN_SIZE, 1)
 
@@ -116,8 +119,11 @@ class MultitaskBERT(nn.Module):
         # Embedding for combined sentences sperated by [SEP}
         emb = self.forward(input_ids, attention_mask, token_type_ids)
 
+        # Layer norm
+        norm_emb = self.paraphrase_ln(emb)
+
         # Apply dropout
-        dropped_emb = self.dropout(emb)
+        dropped_emb = self.dropout(norm_emb)
 
         # Make prediction
         logits = self.paraphrase_classifier(dropped_emb)
@@ -280,7 +286,7 @@ def train_multitask(args):
     model = model.to(device)
 
     lr = args.lr
-    optimizer = AdamW(model.parameters(), lr=lr)
+    optimizer = AdamW(model.parameters(), lr=lr, weight_decay=0.01)
     best_dev_acc = float("-inf")
 
     # Run for the specified number of epochs
@@ -355,6 +361,7 @@ def train_multitask(args):
                     loss = F.binary_cross_entropy_with_logits(logits, y_smooth)
 
                 loss.backward()
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
                 optimizer.step()
 
                 train_loss += loss.item()
