@@ -115,8 +115,8 @@ class SentencePairDataset(Dataset):
         sent1 = [x[0] for x in data]
         sent2 = [x[1] for x in data]
         labels = [x[2] for x in data]
-        if isinstance(labels, list) and 14 > min(map(len, labels)):
-            labels = [x + [0] * (14 - len(x)) for x in labels] # Fill not match tensors with 1 etpc
+        #if isinstance(labels, list) and 14 > min(map(len, labels)):
+        #    labels = [x + [0] * (14 - len(x)) for x in labels] # Fill not match tensors with 1 etpc
 
         sent_ids = [x[3] for x in data]
 
