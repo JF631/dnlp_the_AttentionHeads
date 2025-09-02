@@ -115,7 +115,7 @@ class SentencePairDataset(Dataset):
         sent1 = [x[0] for x in data]
         sent2 = [x[1] for x in data]
         labels = [x[2] for x in data]
-        if 14 > min(map(len, labels)):
+        if isinstance(labels, list) and 14 > min(map(len, labels)):
             labels = [x + [0] * (14 - len(x)) for x in labels] # Fill not match tensors with 1 etpc
 
         sent_ids = [x[3] for x in data]
@@ -334,11 +334,11 @@ def load_multitask_data(sst_filename, quora_filename, sts_filename, etpc_filenam
                 try:
                     sent_id = record["id"].lower().strip()
                     etpc_data.append(
-                        (
-                            preprocess_string(record["sentence1"]),
-                            preprocess_string(record["sentence2"]),
-                            list(map(int, record["paraphrase_type_ids"].strip("][").split(", "))),
-                            sent_id,
+                    (
+                        preprocess_string(record["sentence1"]),
+                        preprocess_string(record["sentence2"]),
+                        list(map(int, record["paraphrase_type_ids"].strip("][").split(", "))),
+                        sent_id,
                         )
                     )
                 except:

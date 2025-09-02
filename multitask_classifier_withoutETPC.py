@@ -214,7 +214,8 @@ def train_multitask(args):
             collate_fn=quora_dev_data.collate_fn
         )
 
-    if args.task == "etpc" or args.task == "multitask":
+    # ETPC dataset: Only build dataloaders for single-task 'etpc', exclude from 'multitask'
+    if args.task == "etpc":
         etpc_train_data = SentencePairDataset(etpc_train_data, args)
         etpc_dev_data = SentencePairDataset(etpc_dev_data, args)
 
@@ -346,8 +347,8 @@ def train_multitask(args):
                 train_loss += loss.item()
                 num_batches += 1
 
-        if args.task == "etpc" or args.task == "multitask":
-            # Train on ETPC (7-label multi-label classification)
+        # Train on ETPC only in single-task mode (excluded from multitask)
+        if args.task == "etpc":
             for batch in tqdm(etpc_train_dataloader, desc=f"train-{epoch + 1:02}-etpc", disable=TQDM_DISABLE):
                 b_ids1 = batch["token_ids_1"].to(device)
                 b_mask1 = batch["attention_mask_1"].to(device)
@@ -412,9 +413,7 @@ def train_multitask(args):
                 dev_parts.append(quora_dev_acc)  # accuracy in [0,1]
                 train_parts.append(quora_train_acc)
 
-            if etpc_dev_dataloader is not None:
-                dev_parts.append(etpc_dev_acc)  # accuracy/F1 per your evaluator
-                train_parts.append(etpc_train_acc)
+            # ETPC intentionally excluded from multitask (dataloaders are None)
 
             if sts_dev_dataloader is not None:
                 # Map Spearman [-1,1] to [0,1] for comparability
