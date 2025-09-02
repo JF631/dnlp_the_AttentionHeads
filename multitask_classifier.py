@@ -89,7 +89,7 @@ class MultitaskBERT(nn.Module):
         # Input is 2 * 768 (two sentence embeddings)
         self.paraphrase_classifier = nn.Linear(2 * BERT_HIDDEN_SIZE, 1)
         # ETPC paraphrase type detection head (7 binary labels, multi-label)
-        self.paraphrase_types_classifier = nn.Linear(2 * BERT_HIDDEN_SIZE, 7)
+        self.paraphrase_types_classifier = nn.Linear(2 * BERT_HIDDEN_SIZE, 14)
 
     def forward(self, input_ids, attention_mask):
         """Takes a batch of sentences and produces embeddings for them."""
@@ -355,7 +355,7 @@ def train_multitask(args):
                 b_mask1 = batch["attention_mask_1"].to(device)
                 b_ids2 = batch["token_ids_2"].to(device)
                 b_mask2 = batch["attention_mask_2"].to(device)
-                b_labels = batch["labels"].to(device).float()  # shape [B,7]
+                b_labels = batch["labels"].to(device).float()  # shape [B,10]
 
                 optimizer.zero_grad()
                 logits = model.predict_paraphrase_types(b_ids1, b_mask1, b_ids2, b_mask2)  # [B,7]

@@ -19,7 +19,6 @@ def preprocess_string(s):
         .split()
     )
 
-
 class SentenceClassificationDataset(Dataset):
     def __init__(self, dataset, args):
         self.dataset = dataset
@@ -116,6 +115,9 @@ class SentencePairDataset(Dataset):
         sent1 = [x[0] for x in data]
         sent2 = [x[1] for x in data]
         labels = [x[2] for x in data]
+        if 14 > min(map(len, labels)):
+            labels = [x + [0] * (14 - len(x)) for x in labels] # Fill not match tensors with 1 etpc
+
         sent_ids = [x[3] for x in data]
 
         encoding1 = self.tokenizer(sent1, return_tensors="pt", padding=True, truncation=True)
@@ -335,7 +337,7 @@ def load_multitask_data(sst_filename, quora_filename, sts_filename, etpc_filenam
                         (
                             preprocess_string(record["sentence1"]),
                             preprocess_string(record["sentence2"]),
-                            list(map(int, record["paraphrase_types"].strip("][").split(", "))),
+                            list(map(int, record["paraphrase_type_ids"].strip("][").split(", "))),
                             sent_id,
                         )
                     )
