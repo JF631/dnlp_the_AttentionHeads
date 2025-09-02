@@ -257,7 +257,6 @@ def train_multitask(args):
     optimizer = AdamW(model.parameters(), lr=lr)
 
     best_dev_acc = float("-inf")
-    print(f"Using {args.optimizer} optimizer for {args.task}.")
     # Run for the specified number of epochs
     for epoch in range(args.epochs):
         model.train()
@@ -364,7 +363,6 @@ def train_multitask(args):
 
                 # Handling different optimizer
                 if args.optimizer == "pcgrad":
-                    print(f"Using {args.optimizer} for optimization")
                     pcg = PCGrad(optimizer)
                     pcg.pc_backward(loss)
                 elif args.optimizer == "gradvac":
