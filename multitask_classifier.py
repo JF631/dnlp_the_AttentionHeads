@@ -279,7 +279,7 @@ def train_multitask(args):
     model = model.to(device)
 
     lr = args.lr
-    optimizer = AdamW(model.parameters(), lr=lr)
+    optimizer = AdamW(model.parameters(), lr=lr, weight_decay=args.weight_decay)
     best_dev_acc = float("-inf")
 
     # Run for the specified number of epochs
@@ -438,6 +438,8 @@ def test_model(args):
 
 def get_args():
     parser = argparse.ArgumentParser()
+
+    parser.add_argument("--weight_decay", type=float, default=0.0, help="AdamW weight decay")
 
     # QQP Arguments
     parser.add_argument("--rdrop_alpha", type=float, default=0.0, help="Coefficient for R-Drop KL term (0=off=default)")
