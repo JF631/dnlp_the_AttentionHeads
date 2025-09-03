@@ -40,6 +40,19 @@ def seed_everything(seed=11711):
 BERT_HIDDEN_SIZE = 768
 N_SENTIMENT_CLASSES = 5
 
+def rdrop_symmetric_kl_with_logits(logits1, logits2, eps=1e-6):
+    """
+    Symmetric KL between Bernoulli distributions parameterized by logits1/logits2
+    """
+    # Logits -> probablilities
+    p1 = torch.sigmoid(logits1).clamp(eps, 1 - eps)
+    p2 = torch.sigmoid(logits2).clamp(eps, 1 - eps)
+
+    # Closed form KL for Bernoulli, no softmax since binary
+    kl1 = p1 * torch.log(p1 / p2) + (1 - p1) * torch.log((1 - p1) / (1 - p2))
+    kl2 = p2 * torch.log(p2 / p1) + (1 - p2) * torch.log((1 - p2) / (1 - p1))
+
+    return 0.5 * (kl1 + kl2).mean() # symmetric
 
 class MultitaskBERT(nn.Module):
     """
@@ -328,10 +341,27 @@ def train_multitask(args):
                 )
 
                 optimizer.zero_grad()
-                logits = model.predict_paraphrase(b_ids, b_mask, b_token_types)
 
-                loss = F.binary_cross_entropy_with_logits(logits, b_labels.float().view(-1))
+                # Normal forward
+                logits1 = model.predict_paraphrase(b_ids, b_mask, b_token_types)
+                bce1 = F.binary_cross_entropy_with_logits(logits1, b_labels.float().view(-1))
+
+                if args.rdrop_alpha > 0.0:
+                    # Second forward but with different drop mask
+                    logits2 = model.predict_paraphrase(b_ids, b_mask, b_token_types)
+                    bce2 = F.binary_cross_entropy_with_logits(logits2, b_labels.float().view(-1))
+                    kl = rdrop_symmetric_kl_with_logits(logits1, logits2)
+
+                    # Avg BCE + alpha * symm KL
+                    loss = 0.5 * (bce1 + bce2) + args.rdrop_alpha * kl
+                else: # Normal forward only if no alpha/=0 
+                    loss = bce1
+
                 loss.backward()
+
+                # Gradient clipping
+                torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
+
                 optimizer.step()
 
                 train_loss += loss.item()
@@ -408,6 +438,10 @@ def test_model(args):
 
 def get_args():
     parser = argparse.ArgumentParser()
+
+    # QQP Arguments
+    parser.add_argument("--rdrop_alpha", type=float, default=0.0, help="Coefficient for R-Drop KL term (0=off=default)")
+    parser.add_argument("--grad_clip", type=float, default=1.0, help="Max grad norm for clipping") # TODO: could use this for all tasks, see when merging
 
     # Training task
     parser.add_argument(
