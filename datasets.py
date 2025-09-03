@@ -201,7 +201,6 @@ class SentencePairTestDataset(Dataset):
         token_ids2 = torch.LongTensor(encoding2["input_ids"])
         attention_mask2 = torch.LongTensor(encoding2["attention_mask"])
         token_type_ids2 = torch.LongTensor(encoding2["token_type_ids"])
-
         return (
             token_ids,
             token_type_ids,
@@ -232,9 +231,7 @@ class SentencePairTestDataset(Dataset):
             "attention_mask_2": attention_mask2,
             "sent_ids": sent_ids,
         }
-
         return batched_data
-
 
 def load_multitask_data(sst_filename, quora_filename, sts_filename, etpc_filename, split="train"):
     sst_data = []
@@ -254,9 +251,7 @@ def load_multitask_data(sst_filename, quora_filename, sts_filename, etpc_filenam
                 if label not in num_labels:
                     num_labels[label] = len(num_labels)
                 sst_data.append((sent, label, sent_id))
-
     print(f"Loaded {len(sst_data)} {split} examples from {sst_filename}")
-
     quora_data = []
     if split == "test":
         with open(quora_filename, "r", encoding="utf-8") as fp:
@@ -269,7 +264,6 @@ def load_multitask_data(sst_filename, quora_filename, sts_filename, etpc_filenam
                         sent_id,
                     )
                 )
-
     else:
         with open(quora_filename, "r", encoding="utf-8") as fp:
             for record in csv.DictReader(fp, delimiter=","):
@@ -285,9 +279,7 @@ def load_multitask_data(sst_filename, quora_filename, sts_filename, etpc_filenam
                     )
                 except:
                     pass
-
     print(f"Loaded {len(quora_data)} {split} examples from {quora_filename}")
-
     sts_data = []
     if split == "test":
         with open(sts_filename, "r", encoding="utf-8") as fp:
@@ -312,9 +304,7 @@ def load_multitask_data(sst_filename, quora_filename, sts_filename, etpc_filenam
                         sent_id,
                     )
                 )
-
     print(f"Loaded {len(sts_data)} {split} examples from {sts_filename}")
-
     etpc_data = []
     if split == "test":
         with open(etpc_filename, "r", encoding="utf-8") as fp:
@@ -327,7 +317,6 @@ def load_multitask_data(sst_filename, quora_filename, sts_filename, etpc_filenam
                         sent_id,
                     )
                 )
-
     else:
         with open(etpc_filename, "r", encoding="utf-8") as fp:
             for record in csv.DictReader(fp, delimiter=","):
@@ -343,7 +332,5 @@ def load_multitask_data(sst_filename, quora_filename, sts_filename, etpc_filenam
                     )
                 except:
                     pass
-
     print(f"Loaded {len(etpc_data)} {split} examples from {etpc_filename}")
-
     return sst_data, num_labels, quora_data, sts_data, etpc_data

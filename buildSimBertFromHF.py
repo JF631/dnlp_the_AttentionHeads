@@ -7,14 +7,12 @@ def _remap_hf_to_simbert(hf_state):
     """Return a new state dict whose keys match your SimBert BertModel."""
     new_state = {}
 
-    # --- Embeddings ---
     new_state["word_embedding.weight"] = hf_state["embeddings.word_embeddings.weight"]
     new_state["pos_embedding.weight"]  = hf_state["embeddings.position_embeddings.weight"]
     new_state["tk_type_embedding.weight"] = hf_state["embeddings.token_type_embeddings.weight"]
     new_state["embed_layer_norm.weight"] = hf_state["embeddings.LayerNorm.weight"]
     new_state["embed_layer_norm.bias"]   = hf_state["embeddings.LayerNorm.bias"]
 
-    # --- Encoder layers ---
     # HF: encoder.layer.{i}.attention.self.{query,key,value}.{weight,bias}
     #     encoder.layer.{i}.attention.output.dense.{weight,bias}
     #     encoder.layer.{i}.attention.output.LayerNorm.{weight,bias}
