@@ -116,6 +116,8 @@ python multitask_classifier.py --option finetune --task=sst --use_gpu --local_fi
 - Implement Sentiment Analysis in `multitask_classifier.py` (implement `predict_sentiment`, implement sentiment classifier)
 - Implement `forward` method in `multitask_classifier.py` together with Lennart Hahner and Lukas Nölke
 - Implement dropout layer in `multitask_classifier.py` with Lukas Nölke
+- Research and implement different pooling methods (mean, max and attention pooling)
+- Research and implement data augmentation methods (synonym replacement and backtranslation)
 
 ### Lennart Hahner
 - Implement Similarity Analysis in `multitask_classifier.py` (implement `predict_similarity`)
