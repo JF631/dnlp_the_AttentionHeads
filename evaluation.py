@@ -30,6 +30,16 @@ from datasets import (
 
 TQDM_DISABLE = False
 
+def _binary_f1(y_true, y_pred):
+    y_true = np.asarray(y_true).astype(int)
+    y_pred = np.asarray(y_pred).astype(int)
+    tp = np.logical_and(y_pred == 1, y_true == 1).sum()
+    fp = np.logical_and(y_pred == 1, y_true == 0).sum()
+    fn = np.logical_and(y_pred == 0, y_true == 1).sum()
+    precision = tp / (tp + fp + 1e-12)
+    recall = tp / (tp + fn + 1e-12)
+    return float(2 * precision * recall / (precision + recall + 1e-12))
+
 
 # Perform model evaluation
 def model_eval_multitask(
@@ -45,21 +55,16 @@ def model_eval_multitask(
         # Evaluate paraphrase detection.
         if task == "qqp" or task == "multitask":
             for step, batch in enumerate(tqdm(quora_dataloader, desc="eval", disable=TQDM_DISABLE)):
-                (b_ids1, b_mask1, b_ids2, b_mask2, b_labels, b_sent_ids) = (
-                    batch["token_ids_1"],
-                    batch["attention_mask_1"],
-                    batch["token_ids_2"],
-                    batch["attention_mask_2"],
+                b_ids, b_mask, b_token_types, b_labels, b_sent_ids = (
+                    batch["token_ids"].to(device),
+                    batch["attention_mask"].to(device),
+                    batch["token_type_ids"].to(device),
                     batch["labels"],
                     batch["sent_ids"],
                 )
 
-                b_ids1 = b_ids1.to(device)
-                b_mask1 = b_mask1.to(device)
-                b_ids2 = b_ids2.to(device)
-                b_mask2 = b_mask2.to(device)
 
-                logits = model.predict_paraphrase(b_ids1, b_mask1, b_ids2, b_mask2)
+                logits = model.predict_paraphrase(b_ids, b_mask, b_token_types)
                 y_hat = logits.sigmoid().round().flatten().cpu().numpy()
                 b_labels = b_labels.flatten().cpu().numpy()
 
@@ -69,8 +74,10 @@ def model_eval_multitask(
 
         if task == "qqp" or task == "multitask":
             quora_accuracy = np.mean(np.array(quora_y_pred) == np.array(quora_y_true))
+            quora_f1 = _binary_f1(quora_y_true, quora_y_pred)
         else:
             quora_accuracy = None
+            quora_f1 = None
 
         sts_y_true = []
         sts_y_pred = []
@@ -177,6 +184,7 @@ def model_eval_multitask(
 
         if task == "qqp" or task == "multitask":
             print(f"Paraphrase detection accuracy: {quora_accuracy:.3f}")
+            print(f"Paraphrase detection F1: {quora_f1:.3f}")
         if task == "sst" or task == "multitask":
             print(f"Sentiment classification accuracy: {sst_accuracy:.3f}")
         if task == "sts" or task == "multitask":
@@ -188,6 +196,7 @@ def model_eval_multitask(
 
     return (
         quora_accuracy,
+        quora_f1,
         quora_y_pred,
         quora_sent_ids,
         sst_accuracy,
@@ -214,20 +223,15 @@ def model_eval_test_multitask(
         # Evaluate paraphrase detection.
         if task == "qqp" or task == "multitask":
             for step, batch in enumerate(tqdm(quora_dataloader, desc="eval", disable=TQDM_DISABLE)):
-                (b_ids1, b_mask1, b_ids2, b_mask2, b_sent_ids) = (
-                    batch["token_ids_1"],
-                    batch["attention_mask_1"],
-                    batch["token_ids_2"],
-                    batch["attention_mask_2"],
+                b_ids, b_mask, b_token_types, b_sent_ids = (
+                    batch["token_ids"].to(device),
+                    batch["attention_mask"].to(device),
+                    batch["token_type_ids"].to(device),
                     batch["sent_ids"],
                 )
 
-                b_ids1 = b_ids1.to(device)
-                b_mask1 = b_mask1.to(device)
-                b_ids2 = b_ids2.to(device)
-                b_mask2 = b_mask2.to(device)
 
-                logits = model.predict_paraphrase(b_ids1, b_mask1, b_ids2, b_mask2)
+                logits = model.predict_paraphrase(b_ids, b_mask, b_token_types)
                 y_hat = logits.sigmoid().round().flatten().cpu().numpy()
 
                 quora_y_pred.extend(y_hat)
@@ -379,6 +383,7 @@ def test_model_multitask(args, model, device):
 
     (
         dev_quora_accuracy,
+        quora_dev_f1,
         dev_quora_y_pred,
         dev_quora_sent_ids,
         dev_sst_accuracy,
