@@ -37,7 +37,16 @@ python bart_detection.py --use_gpu --seed 1171
 
 | **Stanford Sentiment Treebank (SST)** | **Dev Accuracy** |
 |----------------|-----------|
-|Baseline |0.530 (53.0%)           |
+|Baseline |0.535 (0.006)           |      
+|Mean Pooling |0.542 (0.006)           |
+|Max Pooling |0.537 (0.004)           |
+|Attention Pooling |0.543 (0.008)           |
+|Synonym replacement (aug_p=0.1) |0.532 (0.007)           |
+|Synonym replacement (aug_p=0.25) |0.534 (0.002)           |
+|Synonym replacement (aug_p=0.5) |0.529 (0.008)           |
+|Backtranslation |0.541 (0.004)           |
+
+
 
 | **Quora Question Pairs (QQP)** | **Dev Accuracy** |
 |----------------|-----------|
