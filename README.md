@@ -53,6 +53,7 @@ python bart_detection.py --use_gpu --seed 1171
 We ran a series of experiments to evaluate the effect of pooling methods and data augmentation on classification performance on SST. All experiments were repeated with n=4 different seeds (11711, 42, 2025, 34567) to account for variance in training. Each model was finetuned with the 4 pooling methods: [CLS] token embedding (baseline), mean pooling, max pooling and attention pooling. To test the effect of dataset expansion we applied synonym replacement and backtranslation, each was run 4 times using [CLS] pooling.
 
 The following additional packages are required for reproducibility: pip install nlpaug, pip install nltk
+
 Note: 
 - nltk_data/ is included in the repository, and no extra download is needed,
 - A precomputed backtranslated dataset (sst_backtranslated.json) is also in ther epository. This avoids rerunning with MarianMT.
@@ -60,7 +61,7 @@ Note:
 The experiments were run with: 
 ```sh
 
-python multitask_classifier.py --option finetune --task=[sst, sts, qqp] --use_gpu --local_files_only --seed [seed]
+python multitask_classifier.py --option finetune --task=sst --use_gpu --local_files_only --seed [seed]
 ```
 
 ## Results
