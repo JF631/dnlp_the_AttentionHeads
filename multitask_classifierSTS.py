@@ -14,10 +14,10 @@ from torch import nn
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from bert import BertModel
+from bertSTS import BertModel
 from convBert import BertModel as convBertModel
 from simBert import BertModel as simBertModel
-from datasets import (
+from datasetsSTS import (
     SentenceClassificationDataset,
     SentencePairDataset,
     load_multitask_data,
