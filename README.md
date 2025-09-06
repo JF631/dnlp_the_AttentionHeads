@@ -47,6 +47,14 @@ For Paraphrase Type Detection:
 python bart_detection.py --use_gpu --seed 1171
 ```
 
+#### Part 2: Improvements
+
+For SST, run this command : 
+```sh
+
+python multitask_classifier.py --option finetune --task=sst --use_gpu --local_files_only --seed [seed] --sst_pooling [cls, mean, max, attention] --sst_augmentation [synonym, backtranslation, none]
+```
+
 ## Experiments
 
 ### Paraphrase type detection with BART.
@@ -72,8 +80,20 @@ Note:
 The experiments were run with: 
 ```sh
 
-python multitask_classifier.py --option finetune --task=sst --use_gpu --local_files_only --seed [seed] --sst_pooling ["cls", "mean", "max", "attention"] --sst_augmentation ["synonym", "backtranslation", "none"]
+python multitask_classifier.py --option finetune --task=sst --use_gpu --local_files_only --seed [seed] --sst_pooling [cls, mean, max, attention] --sst_augmentation [synonym, backtranslation, none]
 ```
+
+Overall, the implemented improvements did not lead to the hoped increased accuracy and could not solve the problem of overfitting. 
+
+**Pooling Methods**
+
+Mean and attention pooling led to a small improvement in accuracy. Max pooling has very similar results as the baseline. 
+
+**Data augmentation**
+
+Synonym replacement worsened the accuracy, especially for aug_p=0.1 and aug_p=0.5. This was expected, since too little change in sentence variance or too large changes in meaning lead to reduced accuracy. For aug_p=0.25, we have similar results as for the baseline. 
+
+Backtranslation managed to increase the accuracy consistently very marginally, but still the training accuracy goes way up, while dev accuracy stays flat at around 0.50–0.54, which means the model is essentially learning to memorize the augmented data as well but still fails to transfer to unseen examples.
 
 ## Results
 
