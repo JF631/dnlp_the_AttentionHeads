@@ -1,336 +1,488 @@
-#!/usr/bin/env python3
-
-"""
-This module contains our Dataset classes and functions to load the 3 datasets we're using.
-"""
 import csv
+import os
+from typing import List, Dict, Any, Tuple, Optional
 import torch
 from torch.utils.data import Dataset
+from transformers import AutoTokenizer
 
-from tokenizer import BertTokenizer
+def _read_csv_flexible(path: str) -> List[Dict[str, Any]]:
+    """
+    Read a CSV file into a list of row dictionaries.
 
-def preprocess_string(s):
-    return " ".join(
-        s.lower()
-        .replace(".", " .")
-        .replace("?", " ?")
-        .replace(",", " ,")
-        .replace("'", " '")
-        .split()
-    )
+    This function is tolerant to missing files or empty CSVs and will
+    return an empty list in those cases.
+
+    Args:
+        path (str): Path to the CSV file.
+
+    Returns:
+        List[Dict[str, Any]]: A list of dictionaries, one per row.
+    """
+    if not path or not os.path.exists(path):
+        return []
+    rows = []
+    with open(path, "r", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        if reader.fieldnames is None:
+            return []
+        for r in reader:
+            rows.append({(k or "").strip(): (v if v is not None else "") for k, v in r.items()})
+    return rows
+
+
+def _pick_first_present(d: Dict[str, Any], candidates: List[str], default=None):
+    """
+    Return the first non-empty value in a dictionary among candidate keys.
+
+    Args:
+        d (Dict[str, Any]): Source dictionary.
+        candidates (List[str]): Keys to check in order.
+        default (Any, optional): Value to return if none are present.
+
+    Returns:
+        Any: The first present value or the default.
+    """
+    for k in candidates:
+        if k in d and d[k] not in (None, ""):
+            return d[k]
+    return default
+
+
+def _to_float_or_none(x) -> Optional[float]:
+    """
+    Convert a value to float if possible, otherwise return None.
+
+    Args:
+        x (Any): Input value.
+
+    Returns:
+        Optional[float]: Parsed float or None on failure.
+    """
+    try:
+        return float(x)
+    except Exception:
+        return None
+
+
+def _get_tokenizer(args):
+    """
+    Build a Hugging Face tokenizer from CLI args.
+
+    Args:
+        args (argparse.Namespace): Arguments with hf_model_name and local_files_only.
+
+    Returns:
+        transformers.PreTrainedTokenizerBase: Instantiated tokenizer.
+    """
+    name = getattr(args, "hf_model_name", "") or "bert-base-uncased"
+    return AutoTokenizer.from_pretrained(name, local_files_only=getattr(args, "local_files_only", False))
+
+
+def _max_len(args) -> int:
+    """
+    Get the maximum tokenized sequence length from args.
+
+    Args:
+        args (argparse.Namespace): Arguments possibly containing max_length.
+
+    Returns:
+        int: Maximum sequence length (defaults to 128).
+    """
+    return int(getattr(args, "max_length", 128))
+
+
+def _pad_2d_long(seqs: List[torch.Tensor], pad_value: int = 0) -> torch.Tensor:
+    """
+    Left-align and right-pad a list of 1D LongTensors to a 2D tensor.
+
+    Args:
+        seqs (List[torch.Tensor]): Sequence tensors of shape [L_i].
+        pad_value (int): Padding value.
+
+    Returns:
+        torch.Tensor: Padded tensor of shape [B, max_L].
+    """
+    if len(seqs) == 0:
+        return torch.empty(0, 0, dtype=torch.long)
+    max_len = max(int(s.numel()) for s in seqs)
+    out = torch.full((len(seqs), max_len), pad_value, dtype=torch.long)
+    for i, s in enumerate(seqs):
+        L = int(s.numel())
+        if L > 0:
+            out[i, :L] = s[:L]
+    return out
+
 
 class SentenceClassificationDataset(Dataset):
-    def __init__(self, dataset, args):
-        self.dataset = dataset
-        self.p = args
-        self.tokenizer = BertTokenizer.from_pretrained(
-            "bert-base-uncased", local_files_only=args.local_files_only
-        )
+    """
+    Single-sentence dataset for classification/regression tasks.
+
+    Expected row fields (flexible): text in one of
+    {text, sentence, sentence1, s1, review, phrase} and optional label.
+
+    Args:
+        data (List[Dict[str, Any]]): Normalized row dictionaries.
+        args (argparse.Namespace): Tokenization and length settings.
+    """
+
+    def __init__(self, data: List[Dict[str, Any]], args):
+        self.data = data or []
+        self.args = args
+        self.tokenizer = _get_tokenizer(args)
+        self.max_len = _max_len(args)
 
     def __len__(self):
-        return len(self.dataset)
+        """
+        Return the number of examples.
 
-    def __getitem__(self, idx):
-        return self.dataset[idx]
+        Returns:
+            int: Dataset size.
+        """
+        return len(self.data)
 
-    def pad_data(self, data):
-        sents = [x[0] for x in data]
-        labels = [x[1] for x in data]
-        sent_ids = [x[2] for x in data]
+    def _extract(self, row: Dict[str, Any]) -> Tuple[str, Optional[float], Optional[Any]]:
+        """
+        Extract text, label, and optional id from a raw row.
 
-        encoding = self.tokenizer(sents, return_tensors="pt", padding=True, truncation=True)
-        token_ids = torch.LongTensor(encoding["input_ids"])
-        attention_mask = torch.LongTensor(encoding["attention_mask"])
-        labels = torch.LongTensor(labels)
+        Args:
+            row (Dict[str, Any]): Source row dictionary.
 
-        return token_ids, attention_mask, labels, sents, sent_ids
-
-    def collate_fn(self, all_data):
-        token_ids, attention_mask, labels, sents, sent_ids = self.pad_data(all_data)
-
-        batched_data = {
-            "token_ids": token_ids,
-            "attention_mask": attention_mask,
-            "labels": labels,
-            "sents": sents,
-            "sent_ids": sent_ids,
-        }
-
-        return batched_data
-
-
-class SentenceClassificationTestDataset(Dataset):
-    def __init__(self, dataset, args):
-        self.dataset = dataset
-        self.p = args
-        self.tokenizer = BertTokenizer.from_pretrained(
-            "bert-base-uncased", local_files_only=args.local_files_only
+        Returns:
+            Tuple[str, Optional[float], Optional[Any]]: (text, label, sent_id)
+        """
+        text = _pick_first_present(
+            row,
+            ["text", "sentence", "sentence1", "s1", "review", "phrase"],
+            default=""
         )
-
-    def __len__(self):
-        return len(self.dataset)
+        label = _pick_first_present(row, ["label", "labels", "score", "y"])
+        label = _to_float_or_none(label)
+        sid = _pick_first_present(row, ["id", "sent_id", "pair_id", "guid"])
+        return text, label, sid
 
     def __getitem__(self, idx):
-        return self.dataset[idx]
+        """
+        Tokenize an example and return tensors suitable for collation.
 
-    def pad_data(self, data):
-        sents = [x[0] for x in data]
-        sent_ids = [x[1] for x in data]
+        Args:
+            idx (int): Index of the example.
 
-        encoding = self.tokenizer(sents, return_tensors="pt", padding=True, truncation=True)
-        token_ids = torch.LongTensor(encoding["input_ids"])
-        attention_mask = torch.LongTensor(encoding["attention_mask"])
-
-        return token_ids, attention_mask, sents, sent_ids
-
-    def collate_fn(self, all_data):
-        token_ids, attention_mask, sents, sent_ids = self.pad_data(all_data)
-
-        batched_data = {
-            "token_ids": token_ids,
-            "attention_mask": attention_mask,
-            "sents": sents,
-            "sent_ids": sent_ids,
+        Returns:
+            Dict[str, torch.Tensor | float | Any]: Token ids, attention mask, and optional label/id.
+        """
+        row = self.data[idx]
+        text, label, sid = self._extract(row)
+        enc = self.tokenizer(
+            text,
+            truncation=True,
+            padding=False,
+            max_length=self.max_len,
+            return_attention_mask=True,
+            return_tensors=None,
+        )
+        item = {
+            "token_ids": torch.tensor(enc["input_ids"], dtype=torch.long),
+            "attention_mask": torch.tensor(enc["attention_mask"], dtype=torch.long),
         }
+        if label is not None:
+            item["labels"] = float(label)
+        if sid is not None:
+            item["id"] = sid
+        return item
 
-        return batched_data
+    def collate_fn(self, batch: List[Any]) -> Dict[str, torch.Tensor]:
+        """
+        Collate a batch of items into padded tensors.
+
+        Handles both dict items (preferred) and tuple items of the form
+        (ids, mask[, label]).
+
+        Args:
+            batch (List[Any]): Sequence of dataset items.
+
+        Returns:
+            Dict[str, torch.Tensor]: Padded token ids/masks and label tensors.
+        """
+        ids, mask, labels, labels_mask = [], [], [], []
+
+        for i, item in enumerate(batch):
+            if isinstance(item, dict):
+                tid = item["token_ids"]
+                am = item["attention_mask"]
+                lab = item.get("labels", None)
+            else:
+                tid = item[0]
+                am = item[1]
+                lab = item[2] if len(item) >= 3 else None
+
+            tid = tid if torch.is_tensor(tid) else torch.as_tensor(tid, dtype=torch.long)
+            am = am if torch.is_tensor(am) else torch.as_tensor(am, dtype=torch.long)
+            ids.append(tid)
+            mask.append(am)
+
+            if lab is None:
+                labels.append(0.0)
+                labels_mask.append(0)
+            else:
+                labels.append(float(lab))
+                labels_mask.append(1)
+
+        return {
+            "token_ids": _pad_2d_long(ids, pad_value=0),
+            "attention_mask": _pad_2d_long(mask, pad_value=0),
+            "labels": torch.tensor(labels, dtype=torch.float),
+            "labels_mask": torch.tensor(labels_mask, dtype=torch.uint8),
+        }
 
 
 class SentencePairDataset(Dataset):
-    def __init__(self, dataset, args, isRegression=False):
-        self.dataset = dataset
-        self.p = args
-        self.isRegression = isRegression
-        self.tokenizer = BertTokenizer.from_pretrained(
-            "bert-base-uncased", local_files_only=args.local_files_only
-        )
+    """
+    Sentence-pair dataset for QQP/STS/ETPC tasks.
+
+    Expected row fields (flexible):
+    - text1 in {text1, sentence1, s1, question1, q1, premise}
+    - text2 in {text2, sentence2, s2, question2, q2, hypothesis}
+    - optional label and id.
+
+    Args:
+        data (List[Dict[str, Any]]): Normalized row dictionaries.
+        args (argparse.Namespace): Tokenization and length settings.
+    """
+
+    def __init__(self, data: List[Dict[str, Any]], args):
+        self.data = data or []
+        self.args = args
+        self.tokenizer = _get_tokenizer(args)
+        self.max_len = _max_len(args)
 
     def __len__(self):
-        return len(self.dataset)
+        """
+        Return the number of examples.
+
+        Returns:
+            int: Dataset size.
+        """
+        return len(self.data)
+
+    def _extract_pair(self, row: Dict[str, Any]) -> Tuple[str, str, Optional[float], Optional[Any]]:
+        """
+        Extract sentence pair, label, and optional id from a raw row.
+
+        Args:
+            row (Dict[str, Any]): Source row dictionary.
+
+        Returns:
+            Tuple[str, str, Optional[float], Optional[Any]]: (text1, text2, label, sent_id)
+        """
+        t1 = _pick_first_present(row, ["text1", "sentence1", "s1", "question1", "q1", "premise"], default="")
+        t2 = _pick_first_present(row, ["text2", "sentence2", "s2", "question2", "q2", "hypothesis"], default="")
+        if not t2 and "text" in row and "text1" in row:
+            t2 = row.get("text", "")
+        label = _pick_first_present(row, ["label", "labels", "score", "similarity", "y"])
+        label = _to_float_or_none(label)
+        sid = _pick_first_present(row, ["id", "pair_id", "sent_id", "guid"])
+        return t1, t2, label, sid
 
     def __getitem__(self, idx):
-        return self.dataset[idx]
+        """
+        Tokenize a pair example and return tensors suitable for collation.
 
-    def pad_data(self, data):
-        sent1 = [x[0] for x in data]
-        sent2 = [x[1] for x in data]
-        labels = [x[2] for x in data]
-        #if isinstance(labels, list) and 14 > min(map(len, labels)):
-        #    labels = [x + [0] * (14 - len(x)) for x in labels] # Fill not match tensors with 1 etpc
+        Args:
+            idx (int): Index of the example.
 
-        sent_ids = [x[3] for x in data]
+        Returns:
+            Dict[str, torch.Tensor | float | Any]: Token ids/masks for both sentences and optional label/id.
+        """
+        row = self.data[idx]
+        t1, t2, label, sid = self._extract_pair(row)
 
-        encoding1 = self.tokenizer(sent1, return_tensors="pt", padding=True, truncation=True)
-        encoding2 = self.tokenizer(sent2, return_tensors="pt", padding=True, truncation=True)
-
-        token_ids = torch.LongTensor(encoding1["input_ids"])
-        attention_mask = torch.LongTensor(encoding1["attention_mask"])
-        token_type_ids = torch.LongTensor(encoding1["token_type_ids"])
-
-        token_ids2 = torch.LongTensor(encoding2["input_ids"])
-        attention_mask2 = torch.LongTensor(encoding2["attention_mask"])
-        token_type_ids2 = torch.LongTensor(encoding2["token_type_ids"])
-        if self.isRegression:
-            labels = torch.DoubleTensor(labels)
-        else:
-            labels = torch.LongTensor(labels)
-
-        return (
-            token_ids,
-            token_type_ids,
-            attention_mask,
-            token_ids2,
-            token_type_ids2,
-            attention_mask2,
-            labels,
-            sent_ids,
+        enc1 = self.tokenizer(
+            t1, truncation=True, padding=False, max_length=self.max_len,
+            return_attention_mask=True, return_tensors=None,
         )
+        enc2 = self.tokenizer(
+            t2, truncation=True, padding=False, max_length=self.max_len,
+            return_attention_mask=True, return_tensors=None,
+        )
+        item = {
+            "token_ids_1": torch.tensor(enc1["input_ids"], dtype=torch.long),
+            "attention_mask_1": torch.tensor(enc1["attention_mask"], dtype=torch.long),
+            "token_ids_2": torch.tensor(enc2["input_ids"], dtype=torch.long),
+            "attention_mask_2": torch.tensor(enc2["attention_mask"], dtype=torch.long),
+        }
+        if label is not None:
+            item["labels"] = float(label)
+        if sid is not None:
+            item["id"] = sid
+        return item
 
-    def collate_fn(self, all_data):
+    def pad_data(self, data: List[Any]):
+        """
+        Pad a batch of sentence-pair items into uniform tensors.
+
+        Accepts either dict items (preferred) or tuples of the form:
+        (ids1, mask1, ids2, mask2[, label][, sent_id])
+
+        Args:
+            data (List[Any]): Sequence of dataset items.
+
+        Returns:
+            Tuple[torch.Tensor, ...]: Padded batch:
+                token_ids_1, attention_mask_1, token_ids_2, attention_mask_2,
+                labels, sent_ids, labels_mask.
+        """
+        tok1, msk1, tok2, msk2, lbls, sids, lblmask = [], [], [], [], [], [], []
+
+        for i, item in enumerate(data):
+            if isinstance(item, dict):
+                ids1 = item["token_ids_1"]
+                am1 = item["attention_mask_1"]
+                ids2 = item["token_ids_2"]
+                am2 = item["attention_mask_2"]
+                lab = item.get("labels", None)
+                sid = item.get("id", i)
+            else:
+                if len(item) < 4:
+                    raise ValueError(f"SentencePairDataset item too short: len={len(item)}")
+                ids1, am1, ids2, am2 = item[0], item[1], item[2], item[3]
+                lab = item[4] if len(item) >= 5 else None
+                sid = item[5] if len(item) >= 6 else i
+
+            ids1 = ids1 if torch.is_tensor(ids1) else torch.as_tensor(ids1, dtype=torch.long)
+            am1 = am1 if torch.is_tensor(am1) else torch.as_tensor(am1, dtype=torch.long)
+            ids2 = ids2 if torch.is_tensor(ids2) else torch.as_tensor(ids2, dtype=torch.long)
+            am2 = am2 if torch.is_tensor(am2) else torch.as_tensor(am2, dtype=torch.long)
+
+            tok1.append(ids1)
+            msk1.append(am1)
+            tok2.append(ids2)
+            msk2.append(am2)
+
+            if lab is None:
+                lbls.append(0.0)
+                lblmask.append(0)
+            else:
+                lbls.append(float(lab))
+                lblmask.append(1)
+
+            if isinstance(sid, int) or (isinstance(sid, str) and sid.isdigit()):
+                sids.append(int(sid))
+            else:
+                sids.append(i)
+
+        token_ids_1 = _pad_2d_long(tok1, pad_value=0)
+        attention_mask_1 = _pad_2d_long(msk1, pad_value=0)
+        token_ids_2 = _pad_2d_long(tok2, pad_value=0)
+        attention_mask_2 = _pad_2d_long(msk2, pad_value=0)
+        labels = torch.tensor(lbls, dtype=torch.float)
+        sent_ids = torch.tensor(sids, dtype=torch.long)
+        labels_mask = torch.tensor(lblmask, dtype=torch.uint8)
+
+        return token_ids_1, attention_mask_1, token_ids_2, attention_mask_2, labels, sent_ids, labels_mask
+
+    def collate_fn(self, batch: List[Any]) -> Dict[str, torch.Tensor]:
+        """
+        Collate a batch of pair items using robust padding.
+
+        Args:
+            batch (List[Any]): Sequence of dataset items.
+
+        Returns:
+            Dict[str, torch.Tensor]: Padded tensors and masks for the pair task.
+        """
         (
-            token_ids,
-            token_type_ids,
-            attention_mask,
-            token_ids2,
-            token_type_ids2,
-            attention_mask2,
+            token_ids_1,
+            attention_mask_1,
+            token_ids_2,
+            attention_mask_2,
             labels,
             sent_ids,
-        ) = self.pad_data(all_data)
+            labels_mask,
+        ) = self.pad_data(batch)
 
-        batched_data = {
-            "token_ids_1": token_ids,
-            "token_type_ids_1": token_type_ids,
-            "attention_mask_1": attention_mask,
-            "token_ids_2": token_ids2,
-            "token_type_ids_2": token_type_ids2,
-            "attention_mask_2": attention_mask2,
+        return {
+            "token_ids_1": token_ids_1,
+            "attention_mask_1": attention_mask_1,
+            "token_ids_2": token_ids_2,
+            "attention_mask_2": attention_mask_2,
             "labels": labels,
+            "labels_mask": labels_mask,
             "sent_ids": sent_ids,
         }
 
-        return batched_data
 
+def _normalize_sst_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Normalize heterogeneous SST-like rows to a {text, label} schema.
 
-class SentencePairTestDataset(Dataset):
-    def __init__(self, dataset, args):
-        self.dataset = dataset
-        self.p = args
-        self.tokenizer = BertTokenizer.from_pretrained(
-            "bert-base-uncased", local_files_only=args.local_files_only
+    Args:
+        rows (List[Dict[str, Any]]): Raw row dictionaries.
+
+    Returns:
+        List[Dict[str, Any]]: Normalized rows with keys {"text","label"}.
+    """
+    norm = []
+    for r in rows:
+        text = _pick_first_present(
+            r, ["text", "sentence", "review", "phrase"],
+            default=_pick_first_present(r, list(r.keys()), default="")
         )
+        label = _pick_first_present(r, ["label", "labels", "score", "y"])
+        norm.append({"text": text, "label": label})
+    return norm
 
-    def __len__(self):
-        return len(self.dataset)
 
-    def __getitem__(self, idx):
-        return self.dataset[idx]
+def _normalize_pair_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Normalize heterogeneous pair rows to a {text1, text2, label} schema.
 
-    def pad_data(self, data):
-        sent1 = [x[0] for x in data]
-        sent2 = [x[1] for x in data]
-        sent_ids = [x[2] for x in data]
+    Args:
+        rows (List[Dict[str, Any]]): Raw row dictionaries.
 
-        encoding1 = self.tokenizer(sent1, return_tensors="pt", padding=True, truncation=True)
-        encoding2 = self.tokenizer(sent2, return_tensors="pt", padding=True, truncation=True)
-
-        token_ids = torch.LongTensor(encoding1["input_ids"])
-        attention_mask = torch.LongTensor(encoding1["attention_mask"])
-        token_type_ids = torch.LongTensor(encoding1["token_type_ids"])
-
-        token_ids2 = torch.LongTensor(encoding2["input_ids"])
-        attention_mask2 = torch.LongTensor(encoding2["attention_mask"])
-        token_type_ids2 = torch.LongTensor(encoding2["token_type_ids"])
-        return (
-            token_ids,
-            token_type_ids,
-            attention_mask,
-            token_ids2,
-            token_type_ids2,
-            attention_mask2,
-            sent_ids,
+    Returns:
+        List[Dict[str, Any]]: Normalized rows with keys {"text1","text2","label"}.
+    """
+    norm = []
+    for r in rows:
+        t1 = _pick_first_present(
+            r, ["text1", "sentence1", "s1", "question1", "q1", "premise"],
+            default=_pick_first_present(r, list(r.keys()), default="")
         )
+        t2 = _pick_first_present(r, ["text2", "sentence2", "s2", "question2", "q2", "hypothesis"], default="")
+        if t2 == "" and "text" in r and "text1" in r:
+            t2 = r.get("text", "")
+        label = _pick_first_present(r, ["label", "labels", "score", "similarity", "y"])
+        norm.append({"text1": t1, "text2": t2, "label": label})
+    return norm
 
-    def collate_fn(self, all_data):
-        (
-            token_ids,
-            token_type_ids,
-            attention_mask,
-            token_ids2,
-            token_type_ids2,
-            attention_mask2,
-            sent_ids,
-        ) = self.pad_data(all_data)
 
-        batched_data = {
-            "token_ids_1": token_ids,
-            "token_type_ids_1": token_type_ids,
-            "attention_mask_1": attention_mask,
-            "token_ids_2": token_ids2,
-            "token_type_ids_2": token_type_ids2,
-            "attention_mask_2": attention_mask2,
-            "sent_ids": sent_ids,
-        }
-        return batched_data
+def load_multitask_data(sst_path: str, quora_path: str, sts_path: str, etpc_path: str, split: str):
+    """
+    Load and normalize CSVs for multiple tasks.
 
-def load_multitask_data(sst_filename, quora_filename, sts_filename, etpc_filename, split="train"):
-    sst_data = []
-    num_labels = {}
-    if split == "test":
-        with open(sst_filename, "r", encoding="utf-8") as fp:
-            for record in csv.DictReader(fp, delimiter=","):
-                sent = record["sentence"].lower().strip()
-                sent_id = record["id"].lower().strip()
-                sst_data.append((sent, sent_id))
-    else:
-        with open(sst_filename, "r", encoding="utf-8") as fp:
-            for record in csv.DictReader(fp, delimiter=","):
-                sent = record["sentence"].lower().strip()
-                sent_id = record["id"].lower().strip()
-                label = int(record["sentiment"].strip())
-                if label not in num_labels:
-                    num_labels[label] = len(num_labels)
-                sst_data.append((sent, label, sent_id))
-    print(f"Loaded {len(sst_data)} {split} examples from {sst_filename}")
-    quora_data = []
-    if split == "test":
-        with open(quora_filename, "r", encoding="utf-8") as fp:
-            for record in csv.DictReader(fp, delimiter=","):
-                sent_id = record["id"].lower().strip()
-                quora_data.append(
-                    (
-                        preprocess_string(record["sentence1"]),
-                        preprocess_string(record["sentence2"]),
-                        sent_id,
-                    )
-                )
-    else:
-        with open(quora_filename, "r", encoding="utf-8") as fp:
-            for record in csv.DictReader(fp, delimiter=","):
-                try:
-                    sent_id = record["id"].lower().strip()
-                    quora_data.append(
-                        (
-                            preprocess_string(record["sentence1"]),
-                            preprocess_string(record["sentence2"]),
-                            int(float(record["is_duplicate"])),
-                            sent_id,
-                        )
-                    )
-                except:
-                    pass
-    print(f"Loaded {len(quora_data)} {split} examples from {quora_filename}")
-    sts_data = []
-    if split == "test":
-        with open(sts_filename, "r", encoding="utf-8") as fp:
-            for record in csv.DictReader(fp, delimiter=","):
-                sent_id = record["id"].lower().strip()
-                sts_data.append(
-                    (
-                        preprocess_string(record["sentence1"]),
-                        preprocess_string(record["sentence2"]),
-                        sent_id,
-                    )
-                )
-    else:
-        with open(sts_filename, "r", encoding="utf-8") as fp:
-            for record in csv.DictReader(fp, delimiter=","):
-                sent_id = record["id"].lower().strip()
-                sts_data.append(
-                    (
-                        preprocess_string(record["sentence1"]),
-                        preprocess_string(record["sentence2"]),
-                        float(record["similarity"]),
-                        sent_id,
-                    )
-                )
-    print(f"Loaded {len(sts_data)} {split} examples from {sts_filename}")
-    etpc_data = []
-    if split == "test":
-        with open(etpc_filename, "r", encoding="utf-8") as fp:
-            for record in csv.DictReader(fp, delimiter=","):
-                sent_id = record["id"].lower().strip()
-                etpc_data.append(
-                    (
-                        preprocess_string(record["sentence1"]),
-                        preprocess_string(record["sentence2"]),
-                        sent_id,
-                    )
-                )
-    else:
-        with open(etpc_filename, "r", encoding="utf-8") as fp:
-            for record in csv.DictReader(fp, delimiter=","):
-                try:
-                    sent_id = record["id"].lower().strip()
-                    etpc_data.append(
-                    (
-                        preprocess_string(record["sentence1"]),
-                        preprocess_string(record["sentence2"]),
-                        list(map(int, record["paraphrase_type_ids"].strip("][").split(", "))),
-                        sent_id,
-                        )
-                    )
-                except:
-                    pass
-    print(f"Loaded {len(etpc_data)} {split} examples from {etpc_filename}")
-    return sst_data, num_labels, quora_data, sts_data, etpc_data
+    The return signature preserves backward compatibility with existing code:
+    it returns five values, where the second is a placeholder (None).
+
+    Args:
+        sst_path (str): Path to SST CSV.
+        quora_path (str): Path to QQP CSV.
+        sts_path (str): Path to STS CSV.
+        etpc_path (str): Path to ETPC CSV.
+        split (str): Unused split indicator kept for compatibility.
+
+    Returns:
+        Tuple[List[Dict[str, Any]], None, List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]:
+            (sst_data, None, quora_data, sts_data, etpc_data)
+    """
+    sst_rows = _read_csv_flexible(sst_path)
+    quora_rows = _read_csv_flexible(quora_path)
+    sts_rows = _read_csv_flexible(sts_path)
+    etpc_rows = _read_csv_flexible(etpc_path)
+
+    sst_data = _normalize_sst_rows(sst_rows)
+    quora_data = _normalize_pair_rows(quora_rows)
+    sts_data = _normalize_pair_rows(sts_rows)
+    etpc_data = _normalize_pair_rows(etpc_rows)
+
+    _placeholder = None
+    return sst_data, _placeholder, quora_data, sts_data, etpc_data

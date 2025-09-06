@@ -10,7 +10,7 @@
 * Follow `setup.sh` to properly setup a conda environment and install dependencies.
 * For training the model on GWDG's GPU cluster use `setup_gwdg.sh` instead.
 * All packages that are needed will be installed in a conda environment called `dnlp` 
-
+---
 ## Methodology
 
 ### Sentiment Analysis - Stanford Sentiment Treebank (SST)
@@ -40,8 +40,39 @@ Here, negative dominance describes that the 26 dimensional multi hot encoded vec
 - A small MLP as classification head instead of the linear head so far. This has often been discussed in papers, especially in combination with BERT.(e.g., [[1](https://arxiv.org/html/2403.18547v1)], [[2](https://arxiv.org/abs/2210.16771)])
 
 
-## Training
+### Semantic Textual Similarity (STS)
 
+For STS and multitask improvements to BERT, I primarily consulted *“Enhancing miniBERT: Exploring Methods to Improve BERT Performance”* by Salehi et al. ([link](https://web.stanford.edu/class/archive/cs/cs224n/cs224n.1244/final-projects/RajVPabari.pdf)) and implemented the highest-impact techniques according to their Table 3 results. Based on those findings, I implemented multitask fine-tuning and Mixed Attention.
+
+#### Multitask Training
+
+Multitask learning trains on multiple related tasks so the model can learn shared, more generalizable representations. By leveraging common structure across tasks, performance on each individual task can improve. Following Salehi et al. ([link](https://web.stanford.edu/class/archive/cs/cs224n/cs224n.1244/final-projects/RajVPabari.pdf)), I implemented a multitask setup and addressed typical optimization issues with gradient-conflict methods (below).
+
+**PcGrad Optimizer (`pcgradOptimizer.py`)**
+
+PcGrad ([arXiv:2001.06782](https://doi.org/10.48550/arXiv.2001.06782)) adapts standard optimizers to multitask settings by detecting conflicting gradients (e.g., negative cosine similarity across tasks) and projecting them to reduce interference. This mitigates destructive updates between tasks and stabilizes learning.
+
+**GradVac Optimizer (`gradvacOptimizer.py`)**
+
+GradVac ([arXiv:2010.05874](https://doi.org/10.48550/arXiv.2010.05874)) also targets gradient interference but regularizes gradients toward agreement more proactively, not only when conflicts are detected. Conceptually, it enforces cross-task gradient alignment to promote stable, cooperative updates.
+
+**SimBERT Model (`simBert.py`)**
+
+Instead of a plain BERT cross-encoder, I implemented a Siamese/Triplet architecture (SBERT-style) for efficient similarity search, clustering, and retrieval ([arXiv:1908.10084](https://doi.org/10.48550/arXiv.1908.10084)). Cross-encoders score sentence pairs jointly—accurate but expensive at retrieval time. A Siamese encoder computes a fixed embedding for each sentence once, enabling fast approximate nearest-neighbor search—crucial in a multitask setup with larger datasets. As a rule of thumb, SBERT converts tens of millions of pairwise scores into one embedding per sentence plus inexpensive vector search.
+
+Overall, these changes should improve generalization and scalability for STS within a multitask training pipeline.
+
+#### Multi-Attention Layers 
+**ConvBERT (`convBert.py`)**
+
+Beyond the multitask setup, I implemented a mixed-attention architecture using ConvBERT ([arXiv:2008.02496](https://doi.org/10.48550/arXiv.2008.02496)). ConvBERT introduces span-based dynamic convolution that conditions the kernel on a local span, improving phrase-level disambiguation and paraphrase alignment. The mixed attention block retains some self-attention heads (to capture global structure and long-range cues like negation/quantifiers) while replacing redundant local heads with the span convolution (for precise n-gram/phrase alignment). In practice, this can map inputs to a lower-dimensional subspace within attention and reduce the number of heads, trimming computation without hurting accuracy.
+
+#### Mean-Pooling instead of CLS-based
+
+For sentence representations, I replace CLS-based embeddings with attention-masked mean pooling over the last hidden layer—an approach supported by SBERT and subsequent STS practice—yielding more robust similarity embeddings without requiring additional contrastive pretraining ([arXiv:1806.09828](https://doi.org/10.48550/arXiv.1806.09828)).
+
+---
+## Training
 #### Part 1: Baseline
 To train the model and reproduce our results for the baseline, run these commands after activating the environment
 
@@ -66,7 +97,175 @@ For SST, run this command :
 python multitask_classifier.py --option finetune --task=sst --use_gpu --local_files_only --seed [seed] --sst_pooling [cls, mean, max, attention] --sst_augmentation [synonym, backtranslation, none]
 ```
 
+For STS, run this command:
+
+```sh
+python multitask_classifierSTS.py \
+  --task sts \
+  --model convBert \
+  --hf_model_name YituTech/conv-bert-base \
+  --option finetune \
+  --lr 2e-5 \
+  --weight_decay 0.01 \
+  --warmup_ratio 0.1 \
+  --hidden_dropout_prob 0.1 \
+  --batch_size 32 \
+  --epochs 10 \
+  --use_gpu \
+  --amp
+```
+---
 ## Experiments
+### Paraphrase type detection with BART.
+The main drawback we noticed is the already very high accuracy score of the baseline model (around 90%). When we look at how the accuracy is computed however, we see that it is just the overlap between the ground truth multi hot vector and the predicted vector.
+This means if the model "learns" to predict either always only zeroes or only the most frequent type in the training dataset the accuracy will be quite high even though the model is incapable of differentiating between 26 paraphrase types.
+That the model learns to predict always the most frequent type comes from the fact, that the dataset used in training is unbalanced. E.g. we have several thousand examples of some paraphrase types on the one hand and only less than 10 examples of other types.
+
+- we started off with a MultiLabelBalancedBatchSampler which oversamples rare labels via inverse-frequency probabilities so each batch includes more rare types.
+- Next, we combined this with an [Asymmetric Loss For Multi-Label Classification](https://openaccess.thecvf.com/content/ICCV2021/papers/Ridnik_Asymmetric_Loss_for_Multi-Label_Classification_ICCV_2021_paper.pdf?) to. [reduce easy-negative dominance](https://arxiv.org/pdf/2507.11384).
+- As this didn't improve the overall performance significantly, we introduced another loss term, the [Supervised Contrastive Loss](https://arxiv.org/pdf/2004.11362) to make the model cluster common paraphrase types together in the embedding dimension. 
+- Additionally we introduced a nonlinear classification head which is already [discussed to perform better in BERT Models](https://arxiv.org/html/2403.18547v1) 
+
+### Semantic Similarity Prediction - Semantic Textual Similarity (STS)
+#### Multitask-Training 
+
+I first implemented a basic multitask setup. 
+Multitask training should improve BERT’s generalization and, in turn, STS performance. 
+Below are concise results for several multitask variants. Optimizer choices target the well-known issue 
+of **conflicting gradients** in multitask learning, as discussed by Femrite 
+(“Rhapsody on a Theme of Gradient Surgery”) and formalized in PcGrad 
+([arXiv:2001.06782](https://doi.org/10.48550/arXiv.2001.06782)) and 
+GradVac ([arXiv:2010.05874](https://doi.org/10.48550/arXiv.2010.05874)). 
+I also tested an SBERT-style Siamese model 
+([arXiv:1908.10084](https://doi.org/10.48550/arXiv.1908.10084)).
+
+Metrics:
+- QQP (Quora Question Pairs): accuracy  
+- SST: accuracy  
+- STS: Dev Pearson correlation
+
+| Variant               | QQP Acc | SST Acc | STS ρ |
+|-----------------------|:-------:|:-------:|:-----:|
+| Vanilla Multitask     | 0.784   | 0.521   | 0.304 |
+| PcGrad ([link](https://doi.org/10.48550/arXiv.2001.06782))   | 0.784   | 0.524   | 0.282 |
+| GradVac ([link](https://doi.org/10.48550/arXiv.2010.05874))  | 0.784   | 0.524   | 0.282 |
+| SBERT + PcGrad ([link](https://doi.org/10.48550/arXiv.1908.10084)) | 0.770   | 0.509   | 0.326 |
+
+Takeaways:
+- Gradient-surgery methods (PcGrad/GradVac) did **not** improve STS; SST/QQP remained flat.
+- SBERT-style Siamese training slightly recovers STS (0.326) but lags on QQP/SST versus vanilla.
+
+Hyperparameters used:
+````json
+{'batch_size': 64,
+ 'epochs': 10,
+ 'filepath': 'models/finetune-10-1e-05-multitask.pt',
+ 'hidden_dropout_prob': 0.1,
+ 'local_files_only': False,
+ 'lr': 1e-05,
+ 'model': 'simBert',
+ 'optimizer': 'pcgrad',
+ 'option': 'finetune',
+ 'seed': 11711,
+ 'task': 'multitask',
+ 'use_gpu': True}
+````
+
+To reproduce:
+
+```sh
+python multitask_classifierMultitask.py \ 
+  --use_gpu \
+  --model simBert \
+  --opimizer pcgrad \
+  --task multitask \
+  --option finetune \
+  --hidden_dropout_prob 0.1
+```
+
+#### Multilayer-Attention 
+
+For STS alone, I switched to a mixed-attention encoder using ConvBERT: *“ConvBERT: Improving BERT with Span-based Dynamic Convolution”* ([arXiv:2008.02496](https://doi.org/10.48550/arXiv.2008.02496)). ConvBERT replaces some local self-attention heads with span-based dynamic convolutions while keeping global heads, which should help align phrase-level semantics without losing long-range cues.
+
+Metrics: 
+- STS: Dev Pearson correlation
+
+| Task | Metric                  | Value |
+|------|-------------------------|:-----:|
+| STS  | Dev Pearson correlation | 0.338 |
+
+Training/engineering fixes applied:
+
+- Load a compatible pretrained backbone: `YituTech/conv-bert-base`.
+- Enable full encoder fine-tuning (HF backbone).
+- Optimizer: Hugging Face AdamW with decoupled weight decay and parameter groups.
+- Learning-rate schedule with warmup; gradient clipping for stability.
+- Dataloader and `datasets.py` stability fixes.
+
+Result after:
+
+| Task | Metric                  | Value |
+|------|-------------------------|:-----:|
+| STS  | Dev Pearson correlation | 0.397 |
+
+Hyperparameters used:
+```json
+{
+  "amp": true,
+  "batch_size": 32,
+  "epochs": 10,
+  "filepath": "models/finetune-10-2e-05-sts.pt",
+  "hf_model_name": "YituTech/conv-bert-base",
+  "hidden_dropout_prob": 0.1,
+  "local_files_only": false,
+  "lr": 2e-05,
+  "max_grad_norm": 1.0,
+  "model": "convBert",
+  "optimizer": "adamw",
+  "option": "finetune",
+  "seed": 11711,
+  "task": "sts",
+  "use_gpu": true,
+  "warmup_ratio": 0.1,
+  "weight_decay": 0.01
+}
+```
+To reproduce:
+
+```sh
+python multitask_classifierSTS.py \
+  --task sts \
+  --model convBert \
+  --hf_model_name YituTech/conv-bert-base \
+  --option finetune \
+  --lr 2e-5 \
+  --weight_decay 0.01 \
+  --warmup_ratio 0.1 \
+  --hidden_dropout_prob 0.1 \
+  --batch_size 32 \
+  --epochs 10 \
+  --use_gpu \
+  --amp
+```
+
+#### Mean-Pooling used with of Attention-mask
+Replace the function `_encode` in multitask_classifierSTS with
+
+```python
+def _encode(self, input_ids, attention_mask):
+    out = self.bert(input_ids=input_ids, attention_mask=attention_mask, return_dict=True)
+    last = out.last_hidden_state                   
+    mask = attention_mask.unsqueeze(-1)           
+    summed = (last * mask).sum(dim=1)             
+    denom = mask.sum(dim=1).clamp(min=1)          
+    return summed / denom
+```
+Resulting in:
+
+| Task | Metric                  | Value |
+|------|-------------------------|:-----:|
+| STS  | Dev Pearson correlation | 0.395 |
+
 ### Sentiment Analysis - Stanford Sentiment Treebank (SST)
 We ran a series of experiments to evaluate the effect of pooling methods and data augmentation on classification performance on SST. All experiments were repeated with n=4 different seeds (11711, 42, 2025, 34567) to account for variance in training. Each model was finetuned with the 4 pooling methods: [CLS] token embedding (baseline), mean pooling, max pooling and attention pooling. To test the effect of dataset expansion we applied synonym replacement and backtranslation, each was run 4 times using [CLS] pooling.
 
@@ -114,6 +313,22 @@ The overall improved outcome is quite well summarized in these pictures:
 As can be seen, the model now predicts rare types much better than before and improves its recognition performance on almost all paraphrase types (measured by the F1 score) on the dev set.
 
 ## Results
+### Improvements
+#### Multitask Training using simBert and pcGrad
+| Variant               | QQP Acc | SST Acc | STS ρ |
+|-----------------------|:-------:|:-------:|:-----:|
+| Vanilla Multitask     | 0.784   | 0.521   | 0.304 |
+| PcGrad ([link](https://doi.org/10.48550/arXiv.2001.06782))   | 0.784   | 0.524   | 0.282 |
+| GradVac ([link](https://doi.org/10.48550/arXiv.2010.05874))  | 0.784   | 0.524   | 0.282 |
+| SBERT + PcGrad ([link](https://doi.org/10.48550/arXiv.1908.10084)) | 0.770   | 0.509   | 0.326 |
+
+
+#### Semantic Textual Similarity using convGrad
+| Task | Metric                  | Value |
+|------|-------------------------|:-----:|
+| STS  | Dev Pearson correlation | 0.397 |
+
+#### Sentiment Analysis
 
 | **Stanford Sentiment Treebank (SST)** | **Dev Accuracy** |
 |----------------|-----------|
@@ -126,7 +341,7 @@ As can be seen, the model now predicts rare types much better than before and im
 |Synonym replacement (aug_p=0.5) |0.529 (0.008)           |
 |Backtranslation |0.541 (0.004)           |
 
-
+### Baseline
 
 | **Quora Question Pairs (QQP)** | **Dev Accuracy** |
 |----------------|-----------|
@@ -147,9 +362,15 @@ As can be seen, the model now predicts rare types much better than before and im
 |----------------|-----------|
 |Baseline | 44.3   |
 
+---
+
 ## Hyperparameter Optimization
 
+---
+
 ## Visualizations 
+
+---
 
 ## Members Contribution
 ### Jakob Faust
@@ -173,7 +394,14 @@ As can be seen, the model now predicts rare types much better than before and im
 
 ### Lennart Hahner
 - Implement Similarity Analysis in `multitask_classifier.py` (implement `predict_similarity`)
-- Implement `forward` method in `multitaks_classifier.py` with Franziska Ahme and Lukas Nölke
+- Implement `forward.py` method in `multitaks_classifier.py` with Franziska Ahme and Lukas Nölke
+- Implement `simBert.py` for Multitask training using Task-specific layers and enhancing performance.
+- Implement `convBert.py` for Multi-Attention Layers introducing better local attention for STS.
+- Implement `datasetsSTS.py`, `evaluationSTS.py` and `bertSTS.py` to tailor script more for convBert and to help Lukas Nölke and Franziska Ahme to keep their results without conflicts.
+- Implement `gradvacOptimizer.py` as optimizer for multitask training.
+- Implement `pcgradOptimizer.py` as alternative optimizer for multitask training.
+- Implement `multitask_classifierMultitask.py` to enable multitask training by excluding the ETPC dataset.
+- Implement `buildSimBertFromHF.by` to load pre-trained model simBert from Huggingface and use it for finetuning SimBert.
 
 ### Fabian Kathe
 - Implemented context of empty pipeline with transform_data, train_model, test_model, evaluate_model, finetune_paraphrase_generation
@@ -183,7 +411,6 @@ As can be seen, the model now predicts rare types much better than before and im
 # AI-Usage Card
 
 # References 
-
 ### Acknowledgement
 
 The project description, partial implementation, and scripts were adapted from the default final project for the Stanford [CS 224N class](https://web.stanford.edu/class/cs224n/) developed by Gabriel Poesia, John, Hewitt, Amelie Byun, John Cho, and their (large) team (Thank you!)
