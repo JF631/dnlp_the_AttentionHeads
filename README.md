@@ -61,7 +61,7 @@ Note:
 The experiments were run with: 
 ```sh
 
-python multitask_classifier.py --option finetune --task=sst --use_gpu --local_files_only --seed [seed]
+python multitask_classifier.py --option finetune --task=sst --use_gpu --local_files_only --seed [seed] --sst_pooling ["cls", "mean", "max", "attention"] --sst_augmentation ["synonym", "backtranslation", "none"]
 ```
 
 ## Results
