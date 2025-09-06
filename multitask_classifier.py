@@ -149,7 +149,7 @@ class MultitaskBERT(nn.Module):
         else:
             raise ValueError(f"Unknown pooling method: {pooling}")
 
-        logits = self.sentiment_classifier(self.dropout(pooled_embedding))  
+        logits = self.sentiment_classifier(pooled_embedding) 
         return logits
 
     def predict_paraphrase(self, input_ids_1, attention_mask_1, input_ids_2, attention_mask_2):
