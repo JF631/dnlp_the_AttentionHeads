@@ -23,6 +23,21 @@ from datasets import (
 from evaluation import model_eval_multitask, test_model_multitask
 from optimizer import AdamW
 
+import nlpaug.augmenter.word as naw
+import nltk
+import os
+
+from transformers import MarianMTModel, MarianTokenizer
+import json
+
+# NLTK setup
+NLTK_DIR = os.path.join(os.path.dirname(__file__), "nltk_data")
+nltk.data.path.insert(0, NLTK_DIR)
+
+# Backtranslation models
+EN_TO_FR = "Helsinki-NLP/opus-mt-en-fr"
+FR_TO_EN = "Helsinki-NLP/opus-mt-fr-en"
+
 TQDM_DISABLE = False
 
 
@@ -71,13 +86,20 @@ class MultitaskBERT(nn.Module):
         # Sentiment classification layer
         # This layer will be used for the SST dataset.
         self.sentiment_classifier = nn.Linear(config.hidden_size, N_SENTIMENT_CLASSES)
+        # Attention pooling for sentiment
+        self.sentiment_attention = nn.Linear(config.hidden_size, 1)
+
         self.sts_regressor = nn.Linear(self.bert.config.hidden_size * 2, 1)
 
         # Input is 2 * 768 (two sentance embeddings), output is 1 since it is single 0/1 (yes/no)
         self.paraphrase_classifier = nn.Linear(2 * BERT_HIDDEN_SIZE, 1)
 
-    def forward(self, input_ids, attention_mask):
-        """Takes a batch of sentences and produces embeddings for them."""
+    def forward(self, input_ids, attention_mask, return_all_tokens=False):
+        """
+        Takes a batch of sentences and produces embeddings for them.
+        If return_all_tokens=True, returns all token embeddings (batch_size, seq_len, hidden_size).
+        Else, returns pooler_output (batch_size, hidden_size).
+        """
 
         # The final BERT embedding is the hidden state of [CLS] token (the first token).
         # See BertModel.forward() for more details.
@@ -85,6 +107,8 @@ class MultitaskBERT(nn.Module):
         # When thinking of improvements, you can later try modifying this
         # (e.g., by adding other layers).
         bert_output = self.bert(input_ids, attention_mask)
+        if return_all_tokens:
+            return bert_output['last_hidden_state']
         return bert_output['pooler_output']
 
     def predict_sentiment(self, input_ids, attention_mask):
@@ -94,13 +118,38 @@ class MultitaskBERT(nn.Module):
         (0 - negative, 1- somewhat negative, 2- neutral, 3- somewhat positive, 4- positive)
         Thus, your output should contain 5 logits for each sentence.
         Dataset: SST
+
+        Different Pooling methods: 'cls', 'mean', 'max', 'attention'
         """
-        cls_embedding = self.forward(input_ids, attention_mask)
 
-        logits_after_dropout = self.dropout(cls_embedding)
+        pooling = args.sst_pooling  # "cls" (default), "mean", "max", "attention"
 
-        logits = self.sentiment_classifier(logits_after_dropout)
+        if pooling == "cls":
+            cls_embedding = self.forward(input_ids, attention_mask)
+            pooled_embedding = self.dropout(cls_embedding)
+        elif pooling == "mean":
+            token_embeddings = self.forward(input_ids, attention_mask, return_all_tokens=True)  
+            masked_token_embeddings = token_embeddings * attention_mask.unsqueeze(-1)  
+            sum_embeddings = masked_token_embeddings.sum(dim=1)  
+            lengths = attention_mask.sum(dim=1).unsqueeze(-1)  
+            mean_embedding = sum_embeddings / lengths.clamp(min=1e-9)  
+            pooled_embedding = self.dropout(mean_embedding)
+        elif pooling == "max":
+            token_embeddings = self.forward(input_ids, attention_mask, return_all_tokens=True)  
+            masked_token_embeddings = token_embeddings.masked_fill(attention_mask.unsqueeze(-1) == 0, float('-inf'))  
+            max_embedding, _ = masked_token_embeddings.max(dim=1)  
+            pooled_embedding = self.dropout(max_embedding)
+        elif pooling == "attention":
+            token_embeddings = self.forward(input_ids, attention_mask, return_all_tokens=True)  
+            attn_scores = self.sentiment_attention(token_embeddings) 
+            attn_scores = attn_scores.masked_fill(attention_mask.unsqueeze(-1) == 0, float('-inf'))
+            attn_weights = torch.softmax(attn_scores, dim=1) 
+            pooled_embedding = (token_embeddings * attn_weights).sum(dim=1) 
+            pooled_embedding = self.dropout(pooled_embedding)
+        else:
+            raise ValueError(f"Unknown pooling method: {pooling}")
 
+        logits = self.sentiment_classifier(self.dropout(pooled_embedding))  
         return logits
 
     def predict_paraphrase(self, input_ids_1, attention_mask_1, input_ids_2, attention_mask_2):
@@ -170,6 +219,39 @@ def save_model(model, optimizer, args, config, filepath):
     print(f"Saving the model to {filepath}.")
 
 
+# -------------------------
+# Data Augmentation (for SST)
+# -------------------------
+
+def synonym_augment(data, aug_p=0.5):
+    aug = naw.SynonymAug(aug_src="wordnet", aug_p=aug_p)
+    augmented = []
+    for sent, label, sent_id in data:
+        aug_sent = aug.augment(sent)
+        if isinstance(aug_sent, list):
+            aug_sent = " ".join(aug_sent)
+        augmented.append((aug_sent, label, sent_id + "_aug"))
+    return augmented
+
+
+def back_translate(sentence, en_to_fr_model, en_to_fr_tokenizer, fr_to_en_model, fr_to_en_tokenizer, device, max_length=128):
+
+    # EN -> FR
+    inputs = en_to_fr_tokenizer(sentence, return_tensors="pt", padding=True, truncation=True).to(device)
+    with torch.no_grad():
+        translated = en_to_fr_model.generate(**inputs)
+    fr_texts = en_to_fr_tokenizer.batch_decode(translated, skip_special_tokens=True)
+
+    # FR -> EN
+    inputs = fr_to_en_tokenizer(fr_texts, return_tensors="pt", padding=True, truncation=True).to(device)
+    with torch.no_grad():
+        back_translated = fr_to_en_model.generate(**inputs)
+    en_texts = fr_to_en_tokenizer.batch_decode(back_translated, skip_special_tokens=True)
+
+    return en_texts
+
+# -------------------------
+
 # TODO Currently only trains on SST dataset!
 def train_multitask(args):
     device = torch.device("cuda") if args.use_gpu else torch.device("cpu")
@@ -193,6 +275,58 @@ def train_multitask(args):
 
     # SST dataset
     if args.task == "sst" or args.task == "multitask":
+
+        augmentation = args.sst_augmentation # "none" (default), "synonym", "backtranslation"
+
+        if augmentation == "synonym":
+            print("Performing synonym augmentation on SST data...")
+            sst_train_data += synonym_augment(sst_train_data)
+            print(f"Total SST training data size after synonym augmentation: {len(sst_train_data)}")
+        
+        elif augmentation == "backtranslation":
+
+            cache_file = "sst_backtranslated.json"
+
+            if os.path.exists(cache_file):
+                print(f"Loading cached back-translated data from {cache_file}")
+                with open(cache_file, "r") as f:
+                    augmented_data = json.load(f)
+            else:
+                print("Generating back-translated SST data...")
+                en_to_fr_model_name = "Helsinki-NLP/opus-mt-en-fr"
+                fr_to_en_model_name = "Helsinki-NLP/opus-mt-fr-en"
+
+                en_to_fr_tokenizer = MarianTokenizer.from_pretrained(en_to_fr_model_name)
+                en_to_fr_model = MarianMTModel.from_pretrained(en_to_fr_model_name).to(device)
+                fr_to_en_tokenizer = MarianTokenizer.from_pretrained(fr_to_en_model_name)
+                fr_to_en_model = MarianMTModel.from_pretrained(fr_to_en_model_name).to(device)
+
+                augmented_data = []
+                batch_size_bt = 16
+                num_batches = (len(sst_train_data) + batch_size_bt - 1) // batch_size_bt
+                print(f"Back-translating {len(sst_train_data)} sentences in {num_batches} batches of size {batch_size_bt}...")
+
+                for i in tqdm(range(0, len(sst_train_data), batch_size_bt), total=num_batches):
+                    batch = sst_train_data[i:i+batch_size_bt]
+                    batch_texts = [sent for sent, _, _ in batch]
+                    back_texts = back_translate(batch_texts,
+                                                en_to_fr_model, en_to_fr_tokenizer,
+                                                fr_to_en_model, fr_to_en_tokenizer,
+                                                device)
+                    for (orig, label, sent_id), bt_sent in zip(batch, back_texts):
+                        augmented_data.append((bt_sent, label, sent_id + "_bt"))
+                with open(cache_file, "w") as f:
+                    json.dump(augmented_data, f)
+                print(f"Cached {len(augmented_data)} augmented examples to {cache_file}")
+
+            print(f"Generated {len(augmented_data)} back-translated examples for SST training data.")
+            # Combine with original training data
+            sst_train_data = sst_train_data + augmented_data
+            print(f"Total SST training data size after back-translation: {len(sst_train_data)}")
+
+        elif augmentation is None:
+            print("No augmentation applied to SST data.")
+
         sst_train_data = SentenceClassificationDataset(sst_train_data, args)
         sst_dev_data = SentenceClassificationDataset(sst_dev_data, args)
 
@@ -535,6 +669,22 @@ def get_args():
         default=1e-3 if args.option == "pretrain" else 1e-5,
     )
     parser.add_argument("--local_files_only", action="store_true")
+
+    parser.add_argument(
+        "--sst_pooling",
+        type=str,
+        choices=["cls", "mean", "max", "attention"],
+        default="cls",
+        help="Pooling method for sentiment classification",
+    )
+
+    parser.add_argument(
+        "--sst_augmentation",
+        type=str,
+        choices=["synonym", "backtranslation", "none"],
+        default="none",
+        help="Data augmentation for sentiment classification",
+    )
 
     args = parser.parse_args()
     return args
