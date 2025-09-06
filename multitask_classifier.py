@@ -55,6 +55,19 @@ def seed_everything(seed=11711):
 BERT_HIDDEN_SIZE = 768
 N_SENTIMENT_CLASSES = 5
 
+def rdrop_symmetric_kl_with_logits(logits1, logits2, eps=1e-6):
+    """
+    Symmetric KL between Bernoulli distributions parameterized by logits1/logits2
+    """
+    # Logits -> probablilities
+    p1 = torch.sigmoid(logits1).clamp(eps, 1 - eps)
+    p2 = torch.sigmoid(logits2).clamp(eps, 1 - eps)
+
+    # Closed form KL for Bernoulli, no softmax since binary
+    kl1 = p1 * torch.log(p1 / p2) + (1 - p1) * torch.log((1 - p1) / (1 - p2))
+    kl2 = p2 * torch.log(p2 / p1) + (1 - p2) * torch.log((1 - p2) / (1 - p1))
+
+    return 0.5 * (kl1 + kl2).mean() # symmetric
 
 class MultitaskBERT(nn.Module):
     """
@@ -91,10 +104,10 @@ class MultitaskBERT(nn.Module):
 
         self.sts_regressor = nn.Linear(self.bert.config.hidden_size * 2, 1)
 
-        # Input is 2 * 768 (two sentance embeddings), output is 1 since it is single 0/1 (yes/no)
-        self.paraphrase_classifier = nn.Linear(2 * BERT_HIDDEN_SIZE, 1)
+        # Input is 768 (embedding for both sentences), output is 1 since it is single 0/1 (yes/no)
+        self.paraphrase_classifier = nn.Linear(BERT_HIDDEN_SIZE, 1)
 
-    def forward(self, input_ids, attention_mask, return_all_tokens=False):
+    def forward(self, input_ids, attention_mask, return_all_tokens=False, token_type_ids=None):
         """
         Takes a batch of sentences and produces embeddings for them.
         If return_all_tokens=True, returns all token embeddings (batch_size, seq_len, hidden_size).
@@ -106,9 +119,11 @@ class MultitaskBERT(nn.Module):
         # Here, you can start by just returning the embeddings straight from BERT.
         # When thinking of improvements, you can later try modifying this
         # (e.g., by adding other layers).
-        bert_output = self.bert(input_ids, attention_mask)
+
+        bert_output = self.bert(input_ids, attention_mask, token_type_ids)
         if return_all_tokens:
             return bert_output['last_hidden_state']
+
         return bert_output['pooler_output']
 
     def predict_sentiment(self, input_ids, attention_mask):
@@ -152,22 +167,19 @@ class MultitaskBERT(nn.Module):
         logits = self.sentiment_classifier(self.dropout(pooled_embedding))  
         return logits
 
-    def predict_paraphrase(self, input_ids_1, attention_mask_1, input_ids_2, attention_mask_2):
+    def predict_paraphrase(self, input_ids, attention_mask, token_type_ids):
         """
         Given a batch of pairs of sentences, outputs a single logit for predicting whether they are paraphrases.
         Note that your output should be unnormalized (a logit); it will be passed to the sigmoid function
         during evaluation, and handled as a logit by the appropriate loss function.
         Dataset: Quora
         """
-        # Embeddings for each sentences
-        emb1 = self.forward(input_ids_1, attention_mask_1)
-        emb2 = self.forward(input_ids_2, attention_mask_2)
 
-        # Combine embeddings
-        combined_emb = torch.cat((emb1, emb2), dim=1)
+        # Embedding for combined sentences sperated by [SEP}
+        emb = self.forward(input_ids, attention_mask, token_type_ids=token_type_ids)
 
         # Apply dropout
-        dropped_emb = self.dropout(combined_emb)
+        dropped_emb = self.dropout(emb)
 
         # Make prediction
         logits = self.paraphrase_classifier(dropped_emb)
@@ -377,6 +389,10 @@ def train_multitask(args):
             collate_fn=quora_dev_data.collate_fn
         )
 
+    # Early Stopping setup
+    patience = 2
+    patience_counter = 0
+
     # Init model
     config = {
         "hidden_dropout_prob": args.hidden_dropout_prob,
@@ -399,7 +415,7 @@ def train_multitask(args):
     model = model.to(device)
 
     lr = args.lr
-    optimizer = AdamW(model.parameters(), lr=lr)
+    optimizer = AdamW(model.parameters(), lr=lr, weight_decay=args.weight_decay)
     best_dev_acc = float("-inf")
 
     # Run for the specified number of epochs
@@ -453,19 +469,35 @@ def train_multitask(args):
             # Trains the model on the qqp dataset
             for batch in tqdm(quora_train_dataloader, desc=f"train-{epoch + 1:02}", disable=TQDM_DISABLE):
                 # Move batch to device
-                b_ids1, b_mask1, \
-                    b_ids2, b_mask2, \
-                    b_labels = (
-                    batch['token_ids_1'].to(device), batch['attention_mask_1'].to(device),
-                    batch['token_ids_2'].to(device), batch['attention_mask_2'].to(device),
-                    batch['labels'].to(device)
+                b_ids, b_mask, b_token_types, b_labels = (
+                    batch["token_ids"].to(device),
+                    batch["attention_mask"].to(device),
+                    batch["token_type_ids"].to(device),
+                    batch["labels"].to(device)
                 )
 
                 optimizer.zero_grad()
-                logits = model.predict_paraphrase(b_ids1, b_mask1, b_ids2, b_mask2)
 
-                loss = F.binary_cross_entropy_with_logits(logits, b_labels.float().view(-1))
+                # Normal forward
+                logits1 = model.predict_paraphrase(b_ids, b_mask, b_token_types)
+                bce1 = F.binary_cross_entropy_with_logits(logits1, b_labels.float().view(-1))
+
+                if args.rdrop_alpha > 0.0:
+                    # Second forward but with different drop mask
+                    logits2 = model.predict_paraphrase(b_ids, b_mask, b_token_types)
+                    bce2 = F.binary_cross_entropy_with_logits(logits2, b_labels.float().view(-1))
+                    kl = rdrop_symmetric_kl_with_logits(logits1, logits2)
+
+                    # Avg BCE + alpha * symm KL
+                    loss = 0.5 * (bce1 + bce2) + args.rdrop_alpha * kl
+                else: # Normal forward only if no alpha/=0 
+                    loss = bce1
+
                 loss.backward()
+
+                # Gradient clipping
+                torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
+
                 optimizer.step()
 
                 train_loss += loss.item()
@@ -478,7 +510,7 @@ def train_multitask(args):
 
         train_loss = train_loss / num_batches
 
-        quora_train_acc, _, _, sst_train_acc, _, _, sts_train_corr, _, _, etpc_train_acc, _, _ = (
+        quora_train_acc, quora_train_f1, _, _, sst_train_acc, _, _, sts_train_corr, _, _, etpc_train_acc, _, _ = (
             model_eval_multitask(
                 sst_train_dataloader,
                 quora_train_dataloader,
@@ -490,7 +522,7 @@ def train_multitask(args):
             )
         )
 
-        quora_dev_acc, _, _, sst_dev_acc, _, _, sts_dev_corr, _, _, etpc_dev_acc, _, _ = (
+        quora_dev_acc, quora_dev_f1, _, _, sst_dev_acc, _, _, sts_dev_corr, _, _, etpc_dev_acc, _, _ = (
             model_eval_multitask(
                 sst_dev_dataloader,
                 quora_dev_dataloader,
@@ -517,6 +549,13 @@ def train_multitask(args):
         if dev_acc > best_dev_acc:
             best_dev_acc = dev_acc
             save_model(model, optimizer, args, config, args.filepath)
+            patience_counter = 0
+        else:
+            patience_counter += 1
+            print(f"Early stopping patience counter: {patience_counter}/{patience}")
+            if patience_counter >= patience:
+                print("##### Early stopping triggered. Ending Training. #####")
+                break
 
 
 def test_model(args):
@@ -535,6 +574,12 @@ def test_model(args):
 
 def get_args():
     parser = argparse.ArgumentParser()
+
+    parser.add_argument("--weight_decay", type=float, default=0.0, help="AdamW weight decay")
+
+    # QQP Arguments
+    parser.add_argument("--rdrop_alpha", type=float, default=0.0, help="Coefficient for R-Drop KL term (0=off=default)")
+    parser.add_argument("--grad_clip", type=float, default=1.0, help="Max grad norm for clipping") # TODO: could use this for all tasks, see when merging
 
     # Training task
     parser.add_argument(
