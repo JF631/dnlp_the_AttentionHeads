@@ -2,12 +2,19 @@
 
 """
 This module contains our Dataset classes and functions to load the 3 datasets we're using.
+
+You should only need to call load_multitask_data to get the training and dev examples
+to train your model.
 """
+
+
 import csv
+
 import torch
 from torch.utils.data import Dataset
 
 from tokenizer import BertTokenizer
+
 
 def preprocess_string(s):
     return " ".join(
@@ -18,6 +25,7 @@ def preprocess_string(s):
         .replace("'", " '")
         .split()
     )
+
 
 class SentenceClassificationDataset(Dataset):
     def __init__(self, dataset, args):
@@ -115,21 +123,14 @@ class SentencePairDataset(Dataset):
         sent1 = [x[0] for x in data]
         sent2 = [x[1] for x in data]
         labels = [x[2] for x in data]
-        #if isinstance(labels, list) and 14 > min(map(len, labels)):
-        #    labels = [x + [0] * (14 - len(x)) for x in labels] # Fill not match tensors with 1 etpc
-
         sent_ids = [x[3] for x in data]
 
-        encoding1 = self.tokenizer(sent1, return_tensors="pt", padding=True, truncation=True)
-        encoding2 = self.tokenizer(sent2, return_tensors="pt", padding=True, truncation=True)
+        encoding = self.tokenizer(sent1, sent2, return_tensors="pt", padding=True, truncation=True)
 
-        token_ids = torch.LongTensor(encoding1["input_ids"])
-        attention_mask = torch.LongTensor(encoding1["attention_mask"])
-        token_type_ids = torch.LongTensor(encoding1["token_type_ids"])
+        token_ids = torch.LongTensor(encoding["input_ids"])
+        attention_mask = torch.LongTensor(encoding["attention_mask"])
+        token_type_ids = torch.LongTensor(encoding["token_type_ids"])
 
-        token_ids2 = torch.LongTensor(encoding2["input_ids"])
-        attention_mask2 = torch.LongTensor(encoding2["attention_mask"])
-        token_type_ids2 = torch.LongTensor(encoding2["token_type_ids"])
         if self.isRegression:
             labels = torch.DoubleTensor(labels)
         else:
@@ -139,9 +140,6 @@ class SentencePairDataset(Dataset):
             token_ids,
             token_type_ids,
             attention_mask,
-            token_ids2,
-            token_type_ids2,
-            attention_mask2,
             labels,
             sent_ids,
         )
@@ -151,20 +149,14 @@ class SentencePairDataset(Dataset):
             token_ids,
             token_type_ids,
             attention_mask,
-            token_ids2,
-            token_type_ids2,
-            attention_mask2,
             labels,
             sent_ids,
         ) = self.pad_data(all_data)
 
         batched_data = {
-            "token_ids_1": token_ids,
-            "token_type_ids_1": token_type_ids,
-            "attention_mask_1": attention_mask,
-            "token_ids_2": token_ids2,
-            "token_type_ids_2": token_type_ids2,
-            "attention_mask_2": attention_mask2,
+            "token_ids": token_ids,
+            "token_type_ids": token_type_ids,
+            "attention_mask": attention_mask,
             "labels": labels,
             "sent_ids": sent_ids,
         }
@@ -191,23 +183,16 @@ class SentencePairTestDataset(Dataset):
         sent2 = [x[1] for x in data]
         sent_ids = [x[2] for x in data]
 
-        encoding1 = self.tokenizer(sent1, return_tensors="pt", padding=True, truncation=True)
-        encoding2 = self.tokenizer(sent2, return_tensors="pt", padding=True, truncation=True)
+        encoding = self.tokenizer(sent1, sent2, return_tensors="pt", padding=True, truncation=True)
 
-        token_ids = torch.LongTensor(encoding1["input_ids"])
-        attention_mask = torch.LongTensor(encoding1["attention_mask"])
-        token_type_ids = torch.LongTensor(encoding1["token_type_ids"])
+        token_ids = torch.LongTensor(encoding["input_ids"])
+        attention_mask = torch.LongTensor(encoding["attention_mask"])
+        token_type_ids = torch.LongTensor(encoding["token_type_ids"])
 
-        token_ids2 = torch.LongTensor(encoding2["input_ids"])
-        attention_mask2 = torch.LongTensor(encoding2["attention_mask"])
-        token_type_ids2 = torch.LongTensor(encoding2["token_type_ids"])
         return (
             token_ids,
             token_type_ids,
             attention_mask,
-            token_ids2,
-            token_type_ids2,
-            attention_mask2,
             sent_ids,
         )
 
@@ -216,22 +201,18 @@ class SentencePairTestDataset(Dataset):
             token_ids,
             token_type_ids,
             attention_mask,
-            token_ids2,
-            token_type_ids2,
-            attention_mask2,
             sent_ids,
         ) = self.pad_data(all_data)
 
         batched_data = {
-            "token_ids_1": token_ids,
-            "token_type_ids_1": token_type_ids,
-            "attention_mask_1": attention_mask,
-            "token_ids_2": token_ids2,
-            "token_type_ids_2": token_type_ids2,
-            "attention_mask_2": attention_mask2,
+            "token_ids": token_ids,
+            "token_type_ids": token_type_ids,
+            "attention_mask": attention_mask,
             "sent_ids": sent_ids,
         }
+
         return batched_data
+
 
 def load_multitask_data(sst_filename, quora_filename, sts_filename, etpc_filename, split="train"):
     sst_data = []
@@ -251,7 +232,9 @@ def load_multitask_data(sst_filename, quora_filename, sts_filename, etpc_filenam
                 if label not in num_labels:
                     num_labels[label] = len(num_labels)
                 sst_data.append((sent, label, sent_id))
+
     print(f"Loaded {len(sst_data)} {split} examples from {sst_filename}")
+
     quora_data = []
     if split == "test":
         with open(quora_filename, "r", encoding="utf-8") as fp:
@@ -264,6 +247,7 @@ def load_multitask_data(sst_filename, quora_filename, sts_filename, etpc_filenam
                         sent_id,
                     )
                 )
+
     else:
         with open(quora_filename, "r", encoding="utf-8") as fp:
             for record in csv.DictReader(fp, delimiter=","):
@@ -279,7 +263,9 @@ def load_multitask_data(sst_filename, quora_filename, sts_filename, etpc_filenam
                     )
                 except:
                     pass
+
     print(f"Loaded {len(quora_data)} {split} examples from {quora_filename}")
+
     sts_data = []
     if split == "test":
         with open(sts_filename, "r", encoding="utf-8") as fp:
@@ -304,7 +290,9 @@ def load_multitask_data(sst_filename, quora_filename, sts_filename, etpc_filenam
                         sent_id,
                     )
                 )
+
     print(f"Loaded {len(sts_data)} {split} examples from {sts_filename}")
+
     etpc_data = []
     if split == "test":
         with open(etpc_filename, "r", encoding="utf-8") as fp:
@@ -317,20 +305,23 @@ def load_multitask_data(sst_filename, quora_filename, sts_filename, etpc_filenam
                         sent_id,
                     )
                 )
+
     else:
         with open(etpc_filename, "r", encoding="utf-8") as fp:
             for record in csv.DictReader(fp, delimiter=","):
                 try:
                     sent_id = record["id"].lower().strip()
                     etpc_data.append(
-                    (
-                        preprocess_string(record["sentence1"]),
-                        preprocess_string(record["sentence2"]),
-                        list(map(int, record["paraphrase_type_ids"].strip("][").split(", "))),
-                        sent_id,
+                        (
+                            preprocess_string(record["sentence1"]),
+                            preprocess_string(record["sentence2"]),
+                            list(map(int, record["paraphrase_types"].strip("][").split(", "))),
+                            sent_id,
                         )
                     )
                 except:
                     pass
+
     print(f"Loaded {len(etpc_data)} {split} examples from {etpc_filename}")
+
     return sst_data, num_labels, quora_data, sts_data, etpc_data
