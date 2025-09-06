@@ -106,8 +106,10 @@ We mainly focussed on overcomming this major problem by taking and trying out fo
 - As this didn't improve the overall performance significantly, we introduced Supervised Contrastive Learning  to make the model cluster common paraphrase types together in the embedding space to learn real relationships between paraphrase types. 
 - Additionally, we introduced a nonlinear classification head which requires only slightly more effort to train.
 
-The overall improved outcome is quite well summarized in this picture: 
+The overall improved outcome is quite well summarized in these pictures: 
 <img width="600" height="400" alt="per_label_f1_delta" src="https://github.com/user-attachments/assets/6e862f1e-71f0-4063-84b2-f6829468818b" />
+<img width="600" height="400" alt="per_label_f1_before_after" src="https://github.com/user-attachments/assets/069c6302-d48b-4614-82cb-2deeb43db1ae" />
+
 
 As can be seen, the model now predicts rare types much better than before and improves its recognition performance on almost all paraphrase types (measured by the F1 score) on the dev set.
 
