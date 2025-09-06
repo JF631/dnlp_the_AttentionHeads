@@ -13,6 +13,22 @@
 
 ## Methodology
 
+### Sentiment Analysis - Stanford Sentiment Treebank (SST)
+
+**Pooling Methods**
+
+To go beyond BERT's standard approach using the [CLS] token embedding as a summary of the input sequence, we experimented with alternative pooling methods: mean pooling, max pooling and attention-based pooling. 
+- Mean pooling: Mean pooling computes the average of all token embeddings in the sequence. This could result in a small improvement by capturing information from all tokens, potentially improving sentence-level representation.
+- Max pooling: Max pooling takes the maximum value across all tokens.
+- Attention pooling: Attention pooling learns a weighted combination of token embeddings. This allows the model to focus on the most relevant parts of the input. We expected this to have the highest rise in accuracy.
+
+**Data augmentation**
+
+Training NLP models often benefit from larger datasets. The original SST dataset is quite small, so augmentation can improve generalization and robustness and overcome the limitation of small training data.
+
+- Synonym replacement: In this approach we randomly replace a fixed number of words (10%, 25%, 50%) of a sentence with their synonyms (from WordNet) to create more training data. This replacement introduces lexical variety to the train dataset without changing the overall sentiment. As reference, we used [EDA: Easy Data Augmentation Techniques for Boosting Performance on Text Classification Tasks - Jason Wei, Kai Zou](https://arxiv.org/abs/1901.11196).
+- Backtranslation: This approach generates semantically equivalent paraphrases via machine translation, in this case Hugging Face’s MarianMT models. This approach translates an English sentence into French and then back into English, producing natural paraphrases, that are not in the training data exactly as is. The idea for this approach come from [Improving Neural Machine Translation Models with Monolingual Data - Rico Sennrich, Barry Haddow, Alexandra Birch](https://arxiv.org/abs/1511.06709).
+
 ## Training
 
 #### Part 1: Baseline
@@ -33,11 +49,35 @@ python bart_detection.py --use_gpu --seed 1171
 
 ## Experiments
 
+### Sentiment Analysis - Stanford Sentiment Treebank (SST)
+We ran a series of experiments to evaluate the effect of pooling methods and data augmentation on classification performance on SST. All experiments were repeated with n=4 different seeds (11711, 42, 2025, 34567) to account for variance in training. Each model was finetuned with the 4 pooling methods: [CLS] token embedding (baseline), mean pooling, max pooling and attention pooling. To test the effect of dataset expansion we applied synonym replacement and backtranslation, each was run 4 times using [CLS] pooling.
+
+The following additional packages are required for reproducibility: pip install nlpaug, pip install nltk
+
+Note: 
+- nltk_data/ is included in the repository, and no extra download is needed,
+- A precomputed backtranslated dataset (sst_backtranslated.json) is also in ther epository. This avoids rerunning with MarianMT.
+
+The experiments were run with: 
+```sh
+
+python multitask_classifier.py --option finetune --task=sst --use_gpu --local_files_only --seed [seed] --sst_pooling ["cls", "mean", "max", "attention"] --sst_augmentation ["synonym", "backtranslation", "none"]
+```
+
 ## Results
 
 | **Stanford Sentiment Treebank (SST)** | **Dev Accuracy** |
 |----------------|-----------|
-|Baseline |0.530 (53.0%)           |
+|Baseline |0.535 (0.006)           |      
+|Mean Pooling |0.542 (0.006)           |
+|Max Pooling |0.537 (0.004)           |
+|Attention Pooling |0.543 (0.008)           |
+|Synonym replacement (aug_p=0.1) |0.532 (0.007)           |
+|Synonym replacement (aug_p=0.25) |0.534 (0.002)           |
+|Synonym replacement (aug_p=0.5) |0.529 (0.008)           |
+|Backtranslation |0.541 (0.004)           |
+
+
 
 | **Quora Question Pairs (QQP)** | **Dev Accuracy** |
 |----------------|-----------|
@@ -76,6 +116,8 @@ python bart_detection.py --use_gpu --seed 1171
 - Implement Sentiment Analysis in `multitask_classifier.py` (implement `predict_sentiment`, implement sentiment classifier)
 - Implement `forward` method in `multitask_classifier.py` together with Lennart Hahner and Lukas Nölke
 - Implement dropout layer in `multitask_classifier.py` with Lukas Nölke
+- Research and implement different pooling methods (mean, max and attention pooling)
+- Research and implement data augmentation methods (synonym replacement and backtranslation)
 
 ### Lennart Hahner
 - Implement Similarity Analysis in `multitask_classifier.py` (implement `predict_similarity`)
