@@ -29,6 +29,17 @@ Training NLP models often benefit from larger datasets. The original SST dataset
 - Synonym replacement: In this approach we randomly replace a fixed number of words (10%, 25%, 50%) of a sentence with their synonyms (from WordNet) to create more training data. This replacement introduces lexical variety to the train dataset without changing the overall sentiment. As reference, we used [EDA: Easy Data Augmentation Techniques for Boosting Performance on Text Classification Tasks - Jason Wei, Kai Zou](https://arxiv.org/abs/1901.11196).
 - Backtranslation: This approach generates semantically equivalent paraphrases via machine translation, in this case Hugging Face’s MarianMT models. This approach translates an English sentence into French and then back into English, producing natural paraphrases, that are not in the training data exactly as is. The idea for this approach come from [Improving Neural Machine Translation Models with Monolingual Data - Rico Sennrich, Barry Haddow, Alexandra Birch](https://arxiv.org/abs/1511.06709).
 
+### Paraphrase type detection with BART
+To further finetune BART to differentiate between 26 paraphrase types, we focussed on the overall training on inabalanced data sets.
+Therefore, we considered following strategies:
+- New sampling mehtod inside training batches in a way that more rare types are over represented in batches.
+- This can be combined with an [Asymmetric Loss (ASL) for Multi-Label Classification](https://openaccess.thecvf.com/content/ICCV2021/papers/Ridnik_Asymmetric_Loss_for_Multi-Label_Classification_ICCV_2021_paper.pdf?) to focus more on rare labels during traing. This also tackles the easy-negative dominance problem.
+Here, negative dominance describes that the 26 dimensional multi hot encoded vector of {0, 1} has overall much more zeros than ones, as one sentence pair only represents some few paraphrase types (or none at all).
+- We also considered [class weighting methods](https://arxiv.org/pdf/2507.11384) but sticked with frequency based over sampling of rare labels, as it is more robust.
+- [Supervised Contrastive Loss](https://arxiv.org/pdf/2004.11362) to make the model cluster common paraphrase types together in the embedding space. By this, it is easier for the model to actually gain a language understanding and not just learn to predict the most common paraphrase type.
+- A small MLP as classification head instead of the linear head so far. This has often been discussed in papers, especially in combination with BERT.(e.g., [[1](https://arxiv.org/html/2403.18547v1)], [[2](https://arxiv.org/abs/2210.16771)])
+
+
 ## Training
 
 #### Part 1: Baseline
@@ -56,18 +67,6 @@ python multitask_classifier.py --option finetune --task=sst --use_gpu --local_fi
 ```
 
 ## Experiments
-
-### Paraphrase type detection with BART.
-The main drawback we noticed is the already very high accuracy score of the baseline model (around 90%). When we look at how the accuracy is computed however, we see that it is just the overlap between the ground truth multi hot vector and the predicted vector.
-This means if the model "learns" to predict either always only zeroes or only the most frequent type in the training dataset the accuracy will be quite high even though the model is incapable of differentiating between 26 paraphrase types.
-That the model learns to predict always the most frequent type comes from the fact, that the dataset used in training is unbalanced. E.g. we have several thousand examples of some paraphrase types on the one hand and only less than 10 examples of other types.
-
-- we started off with a MultiLabelBalancedBatchSampler which oversamples rare labels via inverse-frequency probabilities so each batch includes more rare types.
-- Next, we combined this with an [Asymmetric Loss For Multi-Label Classification](https://openaccess.thecvf.com/content/ICCV2021/papers/Ridnik_Asymmetric_Loss_for_Multi-Label_Classification_ICCV_2021_paper.pdf?) to. [reduce easy-negative dominance](https://arxiv.org/pdf/2507.11384).
-- As this didn't improve the overall performance significantly, we introduced another loss term, the [Supervised Contrastive Loss](https://arxiv.org/pdf/2004.11362) to make the model cluster common paraphrase types together in the embedding dimension. 
-- Additionally we introduced a nonlinear classification head which is already [discussed to perform better in BERT Models](https://arxiv.org/html/2403.18547v1) 
-
-
 ### Sentiment Analysis - Stanford Sentiment Treebank (SST)
 We ran a series of experiments to evaluate the effect of pooling methods and data augmentation on classification performance on SST. All experiments were repeated with n=4 different seeds (11711, 42, 2025, 34567) to account for variance in training. Each model was finetuned with the 4 pooling methods: [CLS] token embedding (baseline), mean pooling, max pooling and attention pooling. To test the effect of dataset expansion we applied synonym replacement and backtranslation, each was run 4 times using [CLS] pooling.
 
@@ -94,6 +93,23 @@ Mean and attention pooling led to a small improvement in accuracy. Max pooling h
 Synonym replacement worsened the accuracy, especially for aug_p=0.1 and aug_p=0.5. This was expected, since too little change in sentence variance or too large changes in meaning lead to reduced accuracy. For aug_p=0.25, we have similar results as for the baseline. 
 
 Backtranslation managed to increase the accuracy consistently very marginally, but still the training accuracy goes way up, while dev accuracy stays flat at around 0.50–0.54, which means the model is essentially learning to memorize the augmented data as well but still fails to transfer to unseen examples.
+
+### Paraphrase type detection with BART.
+The main drawback we noticed is the already very high accuracy score of the baseline model (around 90%). When we look at how the accuracy is computed however, we see that it is just the overlap between the ground truth multi hot vector and the predicted vector.
+This means if the model "learns" to predict either always only zeroes or only the most frequent type in the training dataset the accuracy will be quite high even though the model is incapable of differentiating between 26 paraphrase types.
+The fact that the model learns to predict always the most frequent type arises beacuse the dataset used for training is unbalanced. E.g. we have several thousand examples of some paraphrase types on the one hand and only less than 10 examples of other types.
+
+We mainly focussed on overcomming this major problem by taking and trying out following approaches:
+
+- we started off with a MultiLabelBalancedBatchSampler which oversamples rare labels via inverse-frequency probabilities so that each batch includes more rare types.
+- Next, we combined this with an ASL (see Methodology) to focus even more on rare types.
+- As this didn't improve the overall performance significantly, we introduced Supervised Contrastive Learning  to make the model cluster common paraphrase types together in the embedding space to learn real relationships between paraphrase types. 
+- Additionally, we introduced a nonlinear classification head which requires only slightly more effort to train.
+
+The overall improved outcome is quite well summarized in this picture: 
+<img width="600" height="400" alt="per_label_f1_delta" src="https://github.com/user-attachments/assets/6e862f1e-71f0-4063-84b2-f6829468818b" />
+
+As can be seen, the model now predicts rare types much better than before and improves its recognition performance on almost all paraphrase types (measured by the F1 score) on the dev set.
 
 ## Results
 
@@ -123,7 +139,7 @@ Backtranslation managed to increase the accuracy consistently very marginally, b
 |Baseline |0.904 (90.4%)           | 0.102           | 0.1915 |
 |Data Loader |0.890 (89.0%)           | 0.080           | 0.1755|
 |Nonlinear classifier + ASL |0.836 (83.6%)           | 0.099           | 0.2583|
-|Supervised Contrastive Loss | 0.834 (83.4%) | 0.113 | 0.2684 |
+|Supervised Contrastive Loss | 0.853 (85.3%) | 0.154 | 0.2993 |
 
 | **Paraphrase Type Generation (PTG)** | BLEU Score |
 |----------------|-----------|
