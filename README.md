@@ -33,6 +33,18 @@ python bart_detection.py --use_gpu --seed 1171
 
 ## Experiments
 
+### Paraphrase type detection with BART.
+The main drawback we noticed is the already very high accuracy score of the baseline model (around 90%). When we look at how the accuracy is computed however, we see that it is just the overlap between the ground truth multi hot vector and the predicted vector.
+This means if the model "learns" to predict either always only zeroes or only the most frequent type in the training dataset the accuracy will be quite high even though the model is incapable of differentiating between 26 paraphrase types.
+That the model learns to predict always the most frequent type comes from the fact, that the dataset used in training is unbalanced. E.g. we have several thousand examples of some paraphrase types on the one hand and only less than 10 examples of other types.
+
+- we started off with a MultiLabelBalancedBatchSampler which oversamples rare labels via inverse-frequency probabilities so each batch includes more rare types.
+- Next, we combined this with an [Asymmetric Loss For Multi-Label Classification](https://openaccess.thecvf.com/content/ICCV2021/papers/Ridnik_Asymmetric_Loss_for_Multi-Label_Classification_ICCV_2021_paper.pdf?) to. [reduce easy-negative dominance](https://arxiv.org/pdf/2507.11384).
+- As this didn't improve the overall performance significantly, we introduced another loss term, the [Supervised Contrastive Loss](https://arxiv.org/pdf/2004.11362) to make the model cluster common paraphrase types together in the embedding dimension. 
+- Additionally we introduced a nonlinear classification head which is already [discussed to perform better in BERT Models](https://arxiv.org/html/2403.18547v1) 
+
+
+
 ## Results
 
 | **Stanford Sentiment Treebank (SST)** | **Dev Accuracy** |
@@ -47,9 +59,12 @@ python bart_detection.py --use_gpu --seed 1171
 |----------------|------------------|
 |Baseline | 0.345(34.5%)               |
 
-| **Paraphrase Type Detection (PTD)** | **Dev Accuracy** |**Matthews Correlation Coefficient (MCC)** |
-|----------------|-----------|------- |
-|Baseline |0.904 (90.4%)           | 0.102           |
+| **Paraphrase Type Detection (PTD)** | **Dev Accuracy** |**Matthews Correlation Coefficient (MCC)** | **Average F1 scor (over all labels)** |
+|----------------|-----------|------- | ------- |
+|Baseline |0.904 (90.4%)           | 0.102           | 0.1915 |
+|Data Loader |0.890 (89.0%)           | 0.080           | 0.1755|
+|Nonlinear classifier + ASL |0.836 (83.6%)           | 0.099           | 0.2583|
+|Supervised Contrastive Loss | 0.834 (83.4%) | 0.113 | 0.2684 |
 
 | **Paraphrase Type Generation (PTG)** | BLEU Score |
 |----------------|-----------|
