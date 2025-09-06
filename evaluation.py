@@ -48,6 +48,8 @@ def model_eval_multitask(
     model.eval()  # switch to eval model, will turn off randomness like dropout
 
     with torch.no_grad():
+        etpc_has_labels = getattr(getattr(etpc_dataloader, "dataset", None), "has_labels", True)
+
         quora_y_true = []
         quora_y_pred = []
         quora_sent_ids = []
@@ -149,7 +151,7 @@ def model_eval_multitask(
         etpc_sent_ids = []
 
         # Evaluate paraphrase type detection.
-        if task == "etpc" or task == "multitask":
+        if task == "etpc":
             for step, batch in enumerate(tqdm(etpc_dataloader, desc="eval", disable=TQDM_DISABLE)):
                 (b_ids1, b_mask1, b_ids2, b_mask2, b_labels, b_sent_ids) = (
                     batch["token_ids_1"],
@@ -173,12 +175,11 @@ def model_eval_multitask(
                 etpc_y_true.extend(b_labels)
                 etpc_sent_ids.extend(b_sent_ids)
 
-        if task == "etpc" or task == "multitask":
-            correct_pred = np.all(np.array(etpc_y_pred) == np.array(etpc_y_true), axis=1).astype(
+        if task == "etpc":
+            correct_pred = np.all(np.array(etpc_y_pred) == np.array(etpc_y_true), axis=0).astype(
                 int
             )
             etpc_accuracy = np.mean(correct_pred)
-            etpc_y_pred = etpc_y_pred.tolist()
         else:
             etpc_accuracy = None
 
@@ -189,7 +190,7 @@ def model_eval_multitask(
             print(f"Sentiment classification accuracy: {sst_accuracy:.3f}")
         if task == "sts" or task == "multitask":
             print(f"Semantic Textual Similarity correlation: {sts_corr:.3f}")
-        if task == "etpc" or task == "multitask":
+        if task == "etpc":
             print(f"Paraphrase Type detection accuracy: {etpc_accuracy:.3f}")
 
     model.train()  # switch back to train model
@@ -283,15 +284,19 @@ def model_eval_test_multitask(
                 sst_y_pred.extend(y_hat)
                 sst_sent_ids.extend(b_sent_ids)
 
+        etpc_y_true = []
         etpc_y_pred = []
         etpc_sent_ids = []
-        if task == "etpc" or task == "multitask":
+
+        # Evaluate paraphrase type detection (multi-label, 7 dims).
+        if task == "etpc":
             for step, batch in enumerate(tqdm(etpc_dataloader, desc="eval", disable=TQDM_DISABLE)):
-                (b_ids1, b_mask1, b_ids2, b_mask2, b_sent_ids) = (
+                (b_ids1, b_mask1, b_ids2, b_mask2, b_labels, b_sent_ids) = (
                     batch["token_ids_1"],
                     batch["attention_mask_1"],
                     batch["token_ids_2"],
                     batch["attention_mask_2"],
+                    batch["labels"],
                     batch["sent_ids"],
                 )
 
@@ -301,10 +306,22 @@ def model_eval_test_multitask(
                 b_mask2 = b_mask2.to(device)
 
                 logits = model.predict_paraphrase_types(b_ids1, b_mask1, b_ids2, b_mask2)
-                y_hat = logits.sigmoid().round().cpu().numpy().astype(int).tolist()
+
+                # Cast predictions and labels to Python lists of ints (shape [B, 7]).
+                y_hat = logits.sigmoid().round().to(torch.int).cpu().tolist()
+                y_true = b_labels.round().to(torch.int).cpu().tolist()
 
                 etpc_y_pred.extend(y_hat)
+                etpc_y_true.extend(y_true)
                 etpc_sent_ids.extend(b_sent_ids)
+
+        if task == "etpc":
+            pred_arr = np.array(etpc_y_pred, dtype=int)
+            true_arr = np.array(etpc_y_true, dtype=int)
+            correct_pred = np.all(pred_arr == true_arr, axis=1).astype(int)
+            etpc_accuracy = float(np.mean(correct_pred))
+        else:
+            etpc_accuracy = None
 
         return (
             quora_y_pred,
@@ -460,7 +477,7 @@ def test_model_multitask(args, model, device):
             for p, s in zip(test_sts_sent_ids, test_sts_y_pred):
                 f.write(f"{p}\t{s}\n")
 
-    if task == "etpc" or task == "multitask":
+    if task == "etpc":
         with open(args.etpc_dev_out, "w+") as f:
             print(f"dev etpc acc :: {dev_etpc_accuracy :.3f}")
             f.write("id,Predicted_Paraphrase_Types\n")
