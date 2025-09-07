@@ -147,6 +147,7 @@ def model_eval_multitask(
                 sts_y_true.extend(y_gold.tolist())
 
                 b_ids = _ensure_ids(sent_ids, ids1.size(0), running_idx)
+                print(b_ids)
                 sts_sent_ids.extend(b_ids)
                 running_idx += ids1.size(0)
 
@@ -308,7 +309,7 @@ def model_eval_test_multitask(
                 ids2 = batch["token_ids_2"].to(device)
                 m2 = batch["attention_mask_2"].to(device)
                 sent_ids = batch.get("sent_ids", None)
-
+                print(sent_ids)
                 scores = model.predict_similarity(ids1, m1, ids2, m2).detach().cpu().numpy()
                 y_hat = scores.flatten()
 

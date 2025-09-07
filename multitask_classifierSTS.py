@@ -368,47 +368,76 @@ def _build_dataloaders(args):
 @torch.no_grad()
 def _eval_sts_pearson(dataloader, model, device, save_path=None):
     """
-    Evaluate STS with Pearson correlation and MSE.
+    Evaluate STS with Pearson r and MSE. Optionally write predictions in the
+    'id,Predicted_Similarity' format where IDs come from the input CSV.
 
     Args:
-        dataloader (DataLoader): DataLoader for STS examples with labels.
-        model (nn.Module): Trained model providing predict_similarity.
-        device (torch.device): Target device.
-        save_path (str, optional): If provided, saves a CSV with predictions and gold labels.
+        dataloader: STS dataloader that yields batches with keys:
+            token_ids_1, attention_mask_1, token_ids_2, attention_mask_2,
+            labels (optional on test), sent_ids (list of str or tensor)
+        model: model with predict_similarity(...)
+        device: torch.device
+        save_path (str | None): if provided, write 'id,Predicted_Similarity' file.
 
     Returns:
-        tuple[float, float]: (Pearson r, MSE) computed on the provided dataloader.
+        (pearson_r: float, mse: float)
     """
     model.eval()
-    preds, golds = [], []
+    preds, golds, all_ids = [], [], []
+    print(save_path)
     for batch in tqdm(dataloader, desc="eval", disable=TQDM_DISABLE):
         ids1 = batch["token_ids_1"].to(device)
-        m1 = batch["attention_mask_1"].to(device)
+        m1   = batch["attention_mask_1"].to(device)
         ids2 = batch["token_ids_2"].to(device)
-        m2 = batch["attention_mask_2"].to(device)
-        y = batch["labels"].detach().cpu().numpy()
+        m2   = batch["attention_mask_2"].to(device)
+
+        # sent_ids can be a list of strings (preferred) or a tensor of ints
+        batch_ids = batch.get("sent_ids", None)
+        if isinstance(batch_ids, torch.Tensor):
+            batch_ids = batch_ids.detach().cpu().tolist()
+        # ensure list of strings
+        batch_ids = [str(x) for x in (batch_ids or [])]
+        all_ids.extend(batch_ids)
 
         out = model.predict_similarity(ids1, m1, ids2, m2).detach().cpu().numpy()
         preds.append(out)
-        golds.append(y)
+
+        if "labels" in batch and batch["labels"] is not None:
+            golds.append(batch["labels"].detach().cpu().numpy())
 
     if len(preds) == 0:
+        # Nothing to evaluate
+        if save_path:
+            # still write an empty header to avoid downstream surprises
+            os.makedirs(os.path.dirname(save_path), exist_ok=True)
+            with open(save_path, "w", encoding="utf-8") as f:
+                f.write("id,Predicted_Similarity\n")
         return 0.0, 0.0
 
     preds = np.concatenate(preds, axis=0)
-    golds = np.concatenate(golds, axis=0)
     preds_rep = np.clip(preds, 0.0, 5.0)
-    pearson_mat = np.corrcoef(preds_rep, golds)
-    r = float(pearson_mat[1][0])
-    mse = float(np.mean((preds_rep - golds) ** 2))
+
+    if golds:
+        golds = np.concatenate(golds, axis=0)
+        pearson_mat = np.corrcoef(preds_rep, golds)
+        r = float(pearson_mat[1][0])
+        mse = float(np.mean((preds_rep - golds) ** 2))
+    else:
+        # test split without golds
+        r = float("nan")
+        mse = float("nan")
 
     if save_path:
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
-        import pandas as pd
-        pd.DataFrame({"pred": preds_rep, "gold": golds}).to_csv(save_path, index=False)
+        # Align lengths defensively in case something odd happened
+        n = min(len(all_ids), len(preds_rep))
+        with open(save_path, "w", encoding="utf-8") as f:
+            f.write("id,Predicted_Similarity\n")
+            for sid, score in zip(all_ids[:n], preds_rep[:n]):
+                # Header uses comma per spec; body uses tab between id and value
+                f.write(f"{sid}\t{float(score)}\n")
 
     return r, mse
-
 
 def train_multitask(args):
     """

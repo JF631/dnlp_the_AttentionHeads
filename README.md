@@ -156,8 +156,8 @@ Takeaways:
 - SBERT-style Siamese training slightly recovers STS (0.326) but lags on QQP/SST versus vanilla.
 
 Hyperparameters used:
-````json
-{'batch_size': 64,
+````
+{'b:watch_size': 64,
  'epochs': 10,
  'filepath': 'models/finetune-10-1e-05-multitask.pt',
  'hidden_dropout_prob': 0.1,
@@ -169,18 +169,18 @@ Hyperparameters used:
  'seed': 11711,
  'task': 'multitask',
  'use_gpu': True}
-````
+```
 
 To reproduce:
 
 ```sh
 python multitask_classifierMultitask.py \ 
-  --use_gpu \
-  --model simBert \
-  --opimizer pcgrad \
-  --task multitask \
-  --option finetune \
-  --hidden_dropout_prob 0.1
+ --use_gpu \
+ --model simBert \
+ --optimizer pcgrad \
+ --task multitask \
+ --option finetune \
+ --hidden_dropout_prob 0.1
 ```
 
 #### Multilayer-Attention 

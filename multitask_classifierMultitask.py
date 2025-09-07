@@ -21,13 +21,13 @@ from tqdm import tqdm
 from bert import BertModel
 from convBert import BertModel as convBertModel
 from simBert import BertModel as simBertModel
-from datasetsSTS import (
+from datasetsMultitask import (
     SentenceClassificationDataset,
     SentencePairDataset,
     load_multitask_data,
 )
 from buildSimBertFromHF import build_simbert_from_pretrained
-from evaluation import model_eval_multitask, test_model_multitask
+from evaluationMultitask import model_eval_multitask, test_model_multitask
 from optimizer import AdamW
 from pcgradOptimizer import PCGrad
 from gradvacOptimizer import GradVac

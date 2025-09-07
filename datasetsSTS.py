@@ -1,9 +1,13 @@
+# datasetsSTS.py
+
 import csv
 import os
 from typing import List, Dict, Any, Tuple, Optional
+
 import torch
 from torch.utils.data import Dataset
 from transformers import AutoTokenizer
+
 
 def _read_csv_flexible(path: str) -> List[Dict[str, Any]]:
     """
@@ -327,9 +331,9 @@ class SentencePairDataset(Dataset):
             data (List[Any]): Sequence of dataset items.
 
         Returns:
-            Tuple[torch.Tensor, ...]: Padded batch:
+            Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, List[Any], torch.Tensor]:
                 token_ids_1, attention_mask_1, token_ids_2, attention_mask_2,
-                labels, sent_ids, labels_mask.
+                labels, sent_ids(list of ids, not a tensor), labels_mask.
         """
         tok1, msk1, tok2, msk2, lbls, sids, lblmask = [], [], [], [], [], [], []
 
@@ -340,7 +344,7 @@ class SentencePairDataset(Dataset):
                 ids2 = item["token_ids_2"]
                 am2 = item["attention_mask_2"]
                 lab = item.get("labels", None)
-                sid = item.get("id", i)
+                sid = item.get("id", None)
             else:
                 if len(item) < 4:
                     raise ValueError(f"SentencePairDataset item too short: len={len(item)}")
@@ -365,22 +369,18 @@ class SentencePairDataset(Dataset):
                 lbls.append(float(lab))
                 lblmask.append(1)
 
-            if isinstance(sid, int) or (isinstance(sid, str) and sid.isdigit()):
-                sids.append(int(sid))
-            else:
-                sids.append(i)
-
+            sids.append(str(sid) if sid is not None else str(i))
         token_ids_1 = _pad_2d_long(tok1, pad_value=0)
         attention_mask_1 = _pad_2d_long(msk1, pad_value=0)
         token_ids_2 = _pad_2d_long(tok2, pad_value=0)
         attention_mask_2 = _pad_2d_long(msk2, pad_value=0)
         labels = torch.tensor(lbls, dtype=torch.float)
-        sent_ids = torch.tensor(sids, dtype=torch.long)
+        sent_ids = sids
         labels_mask = torch.tensor(lblmask, dtype=torch.uint8)
 
         return token_ids_1, attention_mask_1, token_ids_2, attention_mask_2, labels, sent_ids, labels_mask
 
-    def collate_fn(self, batch: List[Any]) -> Dict[str, torch.Tensor]:
+    def collate_fn(self, batch: List[Any]) -> Dict[str, Any]:
         """
         Collate a batch of pair items using robust padding.
 
@@ -388,7 +388,8 @@ class SentencePairDataset(Dataset):
             batch (List[Any]): Sequence of dataset items.
 
         Returns:
-            Dict[str, torch.Tensor]: Padded tensors and masks for the pair task.
+            Dict[str, Any]: Padded tensors and masks for the pair task, with
+                'sent_ids' kept as a Python list (not a tensor).
         """
         (
             token_ids_1,
@@ -428,7 +429,8 @@ def _normalize_sst_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             default=_pick_first_present(r, list(r.keys()), default="")
         )
         label = _pick_first_present(r, ["label", "labels", "score", "y"])
-        norm.append({"text": text, "label": label})
+        sid = _pick_first_present(r, ["id", "pair_id", "sent_id", "guid"])
+        norm.append({"text": text, "label": label, "id": sid})
     return norm
 
 
@@ -452,7 +454,8 @@ def _normalize_pair_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         if t2 == "" and "text" in r and "text1" in r:
             t2 = r.get("text", "")
         label = _pick_first_present(r, ["label", "labels", "score", "similarity", "y"])
-        norm.append({"text1": t1, "text2": t2, "label": label})
+        sid = _pick_first_present(r, ["id", "pair_id", "sent_id", "guid"])
+        norm.append({"text1": t1, "text2": t2, "label": label, "id": sid})
     return norm
 
 
