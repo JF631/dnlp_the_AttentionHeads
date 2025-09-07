@@ -442,6 +442,15 @@ Note: The crossed out imprvementes/versions have been discarded/reverted due to 
 - Implement Paraphrase detection in `multitask_classifier.py` (implement `predict_paraphrase`, implement data loading of the qqp dataset, implement training loop for the qqp task, implement paraphrase classifier)
 - Implement `forward` methode in `multitask_classifier.py` together with Franziska Ahme and Lennart Hahner
 - Implement dropout layer in `multitask_classifier.py` with Franziska Ahme
+- Improve baseline of the Quora Praphrase Detection task:
+  - Research and implement cross-encoder architecture
+  - Research and implement pos_weight and label smoothing (discarded)
+  - Research and implement online pair order augmentation (discarded)
+  - Implement stronger head (discarded)
+  - Research and implement gradual layer unfreezing (discarded)
+  - Research and implement mean pooling (discarded)
+  - Research and implement R-Drop
+- Merge and assist in merging different task branches into main branch with all other group members
 
 ### Franziska Ahme
 - Implement `add_norm` in `bert.py`
