@@ -104,6 +104,11 @@ python bart_detection.py --use_gpu --seed 1171
 
 #### Part 2: Improvements
 
+For QQP, run this command :
+```sh
+python multitask_classifier.py --option finetune --task=qqp --use_gpu --rdrop_alpha=2.0 --grad_clip=1.0
+```
+
 For SST, run this command : 
 ```sh
 
