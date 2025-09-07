@@ -156,7 +156,7 @@ Takeaways:
 - SBERT-style Siamese training slightly recovers STS (0.326) but lags on QQP/SST versus vanilla.
 
 Hyperparameters used:
-````
+```
 {'b:watch_size': 64,
  'epochs': 10,
  'filepath': 'models/finetune-10-1e-05-multitask.pt',
