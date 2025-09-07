@@ -134,6 +134,38 @@ python multitask_classifierSTS.py \
 ```
 ---
 ## Experiments
+
+### Paraphrase Detection - Quora Question Pairs (QQP)
+The initial architectural improvement, where we moved from the initial dual-encoder to the single-pass cross-encoder, provided the most significant improvement in accuracy, while also improving the training time.
+Improvement/Version | Accuracy | F1 Score
+-- | -- | --
+Baseline | 0.771 | –
+Cross-Encoder Encoding | 0.888 | 0.848
+
+These results confirmed that allowing the model to process both sentences together is critical for the QQP task, thus making it the new base-version for all subsequent experiments.
+
+Building on top of the now strong cross-encoder version, we experimented with several common techniques, incrementally adding them to the model. The main goal was to improve generalization and combat overfitting as well as the class imbalance of the QQP dataset. The results below were achieved with the default bert settings defined in `multitask_classifier.py` while training for only three epochs due to the lack of improvement and overall computation time and cost of the task.
+Improvement/Version | Accuracy | F1 Score
+-- | -- | --
+Cross-Encoder Encoding (new Baseline) | 0.888 | 0.848
++[Pos_Weight](https://docs.pytorch.org/docs/stable/generated/torch.nn.BCEWithLogitsLoss.html) + [Label Smoothing](https://arxiv.org/pdf/1906.02629) | 0.885 | 0.854
++[Pair-order Augmentation](https://arxiv.org/pdf/1901.11196) (implemented as online augmentation)| 0.884 | 0.851
++Stronger Head | 0.884 | 0.851
++[Gradual Layer Unfreezing](https://arxiv.org/pdf/1801.06146) | 0.876 | 0.846
++[Mean Pooling](https://arxiv.org/pdf/1908.10084) | 0.884 | 0.840
+
+However, as seen in the results above, none of the additions resulted in a clear and significant improvement. While some techniques provided a marginal increase in the F1 score, this often came at the cost of the accuracy. Due to the lack of consistent improvement, this development path was discarded and the model was [reverted to the single-pass encoder](https://github.com/JF631/dnlp_the_AttentionHeads/pull/6/commits/dae04b3ee7857532f99745158b3488df531a63b0).
+
+Going back to the initial observation that the model was overfitting quickly, we decided to test a different regularization technique. After implementing R-Drop on top of the single-pass encoder baseline, we then focused on experimenting with different values for the hyperparameter `alpha`, as shown below.
+Improvement/Version| Accuracy | F1
+-- | -- | --
+Cross-Encoder baseline (new Baseline) | 0.888 | 0.848
+R-Drop (α=0.5) | 0.892 | 0.854
+R-Drop (α=1.0) | 0.892 | 0.852
+**R-Drop (α=2.0)** | **0.896** | **0.861**
+
+We found that a `alpha=2.0` yielded the best overall performance on top of the cross-encoder baseline.
+
 ### Paraphrase type detection with BART.
 The main drawback we noticed is the already very high accuracy score of the baseline model (around 90%). When we look at how the accuracy is computed however, we see that it is just the overlap between the ground truth multi hot vector and the predicted vector.
 This means if the model "learns" to predict either always only zeroes or only the most frequent type in the training dataset the accuracy will be quite high even though the model is incapable of differentiating between 26 paraphrase types.
@@ -361,9 +393,18 @@ As can be seen, the model now predicts rare types much better than before and im
 
 ### Baseline
 
-| **Quora Question Pairs (QQP)** | **Dev Accuracy** |
-|----------------|-----------|
-|Baseline |0.781 (78.1%)          |
+| **Quora Question Pairs (QQP)** | **Dev Accuracy** | **Dev F1 Score**
+|-----------|-----------|-----------|
+|Baseline | 0.781 | -
+Cross-Encoder| 0.888 | 0.848
+~~+Pos_Weight + Label Smoothing~~ | ~~0.885~~ | ~~0.854~~
+~~+Pair-order Augmentation (implemented as online augmentation)~~| ~~0.884~~ | ~~0.851~~
+~~+Stronger Head~~ | ~~0.884~~ | ~~0.851~~
+~~+Gradual Layer Unfreezing~~ | ~~0.876~~ | ~~0.846~~
+~~+Mean Pooling~~ | ~~0.884~~ | ~~0.840~~
+**R-Drop (α=2.0)** | **0.896** | **0.861**
+
+Note: The crossed out imprvementes/versions have been discarded/reverted due to the lack of significant improved results.
 
 | **Semantic Textual Similarity (STS)** | **Dev Accuracy** |
 |----------------|------------------|
