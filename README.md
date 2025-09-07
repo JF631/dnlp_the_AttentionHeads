@@ -163,6 +163,7 @@ Cross-Encoder baseline (new Baseline) | 0.888 | 0.848
 R-Drop (α=0.5) | 0.892 | 0.854
 R-Drop (α=1.0) | 0.892 | 0.852
 **R-Drop (α=2.0)** | **0.896** | **0.861**
+R-Drop (α=4.0) | 0.890 | 0.854
 
 We found that a `alpha=2.0` yielded the best overall performance on top of the cross-encoder baseline.
 
