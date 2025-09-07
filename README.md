@@ -13,6 +13,19 @@
 ---
 ## Methodology
 
+### Paraphrase Detection - Quora Question Pairs (QQP)
+To improve the existing baseline of the Quora Paraphrase Detection task, we focussed mainly on changing the architecture and introducing stronger regularization. Some additional ideas have been explored, but were ultimately discarded as they did not yield significant performance gains.
+
+#### Architectural Changes ([5c9e7f1a](https://github.com/JF631/dnlp_the_AttentionHeads/pull/6/commits/5c9e7f1a61492ba0ff3712b3d59d1c6d66a2a7b2))
+The initial implementation (baseline) of Paraphrase Detection Task with the QQP Dataset used a dual-encoder architecture, where each sentence in a pair is tokenized and processed individually. This is not only prevents rich token-level interactions between the two sentences, but also more computationally expensive, since two passes through the model are required per sentence pair.
+
+To address those issues, the first improvement focussed on implementing a Single-Pass Cross-Encoder architecture, as introduced in [BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding](https://arxiv.org/pdf/1810.04805). This architectural change involves concatenating the two sentences and feeding them through the model in one forward pass, while using token type ids to to differentiate between the original sentences. This approach is not only more computationally efficient, but also improves the accuracy, since the self-attention layer can now model relationships between the two sentences.
+
+#### Regularization ([6de22794](https://github.com/JF631/dnlp_the_AttentionHeads/pull/6/commits/6de22794fe30ca8ed97a52e1a97f5fef92889270))
+Large pre-trained models like BERT are prone to overfitting, when training on smaller, task-specific datasets. This was also the case for the Paraphrase Detection task, using the QQP dataset, where the model would overfit after fine-tuning it for even a single epoch.
+
+In order to try and combat overfitting, [R-Drop Regularization](https://arxiv.org/pdf/2106.14448) was introduced. The model now performs two forward passes with different dropout masks and calculates their averaged standard Cross-Entropy loss against the ground-truth labels. The KL-Divergence loss is then used to penalize the model if the two outputs are significantly different, forcing the two dropout sub-models to be consistent with each other.
+
 ### Sentiment Analysis - Stanford Sentiment Treebank (SST)
 
 **Pooling Methods**
