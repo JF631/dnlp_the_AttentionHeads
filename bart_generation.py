@@ -68,7 +68,7 @@ def transform_data(dataset, max_length=256,  shuffle = False):
     for _, row in dataset.iterrows():
         sentence1 = str(row["sentence1"])
         segment = str(row.get("sentence1_segment_location", ""))
-        types = str(row.get("paraphrase_types", ""))  # Use correct column if needed
+        types = str(row.get("paraphrase_type_ids", "")) 
 
         input_text = f"{sentence1} </s> {segment} </s> {types}"
         input_texts.append(input_text)
