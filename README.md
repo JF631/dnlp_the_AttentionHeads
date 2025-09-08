@@ -53,6 +53,16 @@ Here, negative dominance describes that the 26 dimensional multi hot encoded vec
 - A small MLP as classification head instead of the linear head so far. This has often been discussed in papers, especially in combination with BERT.(e.g., [[1](https://arxiv.org/html/2403.18547v1)], [[2](https://arxiv.org/abs/2210.16771)])
 
 
+### Paraphrase Type Generation (PTG)
+
+To Improve the Baseline of PTG we implemented two improvents and a few minor changes. 
+When training from the pretrained model, we noticed a big drop of the Bleu metric. our improvements are therefore ment to counteract that behavior. We decided to use a warmup which shedules the learningrate better for training with our massive pretrained model, and use k_drop to make it more robust and improve out second metric IBleu.
+
+IBleu is a metric that compares the input and output like Bleu, but considers when the model is just copying the original sentence. This behavior will result in a high Bleu score, which is not representing a proper paraphrasing. 
+
+In general our subbmission/training is fokused on keeping a high Bleu score, since this was the metric given to us. However, since the more telling metric is IBleu, we also included it in the results. Our early stopper often regarded improvements in the IBleu Score, since the Bleu score dropped.
+
+
 ### Semantic Textual Similarity (STS)
 
 For STS and multitask improvements to BERT, I primarily consulted *“Enhancing miniBERT: Exploring Methods to Improve BERT Performance”* by Salehi et al. ([link](https://web.stanford.edu/class/archive/cs/cs224n/cs224n.1244/final-projects/RajVPabari.pdf)) and implemented the highest-impact techniques according to their Table 3 results. Based on those findings, I implemented multitask fine-tuning and Mixed Attention.
