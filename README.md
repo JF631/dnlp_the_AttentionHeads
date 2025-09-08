@@ -480,6 +480,10 @@ Note: The crossed out imprvementes/versions have been discarded/reverted due to 
 ### Fabian Kathe
 - Implemented context of empty pipeline with transform_data, train_model, test_model, evaluate_model, finetune_paraphrase_generation
 - Uploaded chache with base model to Cluster, needed for finetuning and for local files only
+- Implemented warmup for bart_generation.py
+- Implemented k_drop for bart_generation.py
+- Implemented early stopper & freezing for bart_generation.py
+- Implemented verify_outputBartGen.py to check generations manually
 
 
 # AI-Usage Card
