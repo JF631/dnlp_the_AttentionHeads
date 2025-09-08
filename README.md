@@ -56,7 +56,9 @@ Here, negative dominance describes that the 26 dimensional multi hot encoded vec
 ### Paraphrase Type Generation (PTG)
 
 To Improve the Baseline of PTG we implemented two improvents and a few minor changes. 
-When training from the pretrained model, we noticed a big drop of the Bleu metric. our improvements are therefore ment to counteract that behavior. We decided to use a warmup which shedules the learningrate better for training with our massive pretrained model, and use k_drop to make it more robust and improve out second metric IBleu.
+When training from the pretrained model, we noticed a big drop of the Bleu metric. our improvements are therefore ment to counteract that behavior. We decided to use a warmup which shedules the learningrate better for training with our massive pretrained model, and use [k_drop](
+https://doi.org/10.48550/arXiv.2106.14448
+) to make it more robust and improve out second metric IBleu. 
 
 IBleu is a metric that compares the input and output like Bleu, but considers when the model is just copying the original sentence. This behavior will result in a high Bleu score, which is not representing a proper paraphrasing. 
 
