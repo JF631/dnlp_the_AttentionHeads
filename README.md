@@ -199,18 +199,18 @@ That the model learns to predict always the most frequent type comes from the fa
 - As this didn't improve the overall performance significantly, we introduced another loss term, the [Supervised Contrastive Loss](https://arxiv.org/pdf/2004.11362) to make the model cluster common paraphrase types together in the embedding dimension. 
 - Additionally we introduced a nonlinear classification head which is already [discussed to perform better in BERT Models](https://arxiv.org/html/2403.18547v1)
 
-# Paraphrase Type Generation (PTG)
+### Paraphrase Type Generation (PTG)
 
 PTG is a task that has two main objectives. Generate semantically similar sentences, but also ones that differ from the input. Our experiments resulted in two improvements that tackle those challenges. 
 
-### Experiment 1 ( Freezing all but two Layers)
+#### Experiment 1 ( Freezing all but two Layers)
 Our original baseline had a Bleu score of 41. This is due to the rapid drop of the fine-tuning mentioned in the methodology. With the given baseline orientation of 46, we felt like this was not sufficient and added a freezing of all layers but the last two. Resulting in a Bleu Score of 44.3. This is obviously more a hot fix than a solution since we didn't allow the model to properly learn. This is why we ultimately decided to revert the change and move on to proper improvements. While doing so, we also decided to implement a more representative score named IBleu that includes a punishment for copied results. 
 | **Experiment 1** | **Bleu Score** |**IBleu Score** 
 |----------------|-----------|------- |
 |Baseline (froozen layers) |44.30           |-           |
 |Implementing IBleu (not freezing layers) |41.74           |  30.15 
 
-### Experiment 2 (Adjusting the learning rate with a warmup)
+#### Experiment 2 (Adjusting the learning rate with a warmup)
 Tackling the rapid degeneration of the Blue score, we decided to rather use a dynamic learning rate to try and preserve the pretrained weights at first to prevent the score drop. This worked astonishingly well with an improvement from the original 41 Bleu score to 45.7 Bleu Score. 
 
 | **Experiment 2** | **Bleu Score** |**IBleu Score** 
@@ -218,7 +218,7 @@ Tackling the rapid degeneration of the Blue score, we decided to rather use a dy
 |Implementing IBleu (not freezing layers) |41.74           |  30.15        
 |Implementing warmup |45.77           | 32.57          
 
-### Experiment 3 ( Using k_drop to introduce noise)
+#### Experiment 3 ( Using k_drop to introduce noise)
 For the third experiment, we tried to use k_drop, a form of noise introduction to the model. By doing so we hoped to make the training more robust and also incentivize the model to rephrase rather than do. This is because the dropout will greatly disturb the prediction when just copying. As predicted by us, this did indeed improve the scores, especially the Bleu score calculated on the original sentences (a reference in the code to see the copying trend while training). Which led us to the following final scores:
 
 | **Experiment 3** | **Bleu Score** |**IBleu Score** 
@@ -226,7 +226,7 @@ For the third experiment, we tried to use k_drop, a form of noise introduction t
 |Implementing warmup |45.77           | 32.57      
 |Implementing k_drop |46.51           | 32.85 
 
-### General Consideration for Training
+#### General Consideration for Training
 It's important to note that our training utilized an early stopper that was set on the Bleu score. Even though we noticed that other scores may be more representative, we used Bleu as it was the referenced metric in our task.
 
 This meant that often the model was still learning to rephrase rather than copying. Which could be seen in the referencing BLEU score for the original sentences. However, since the Bleu score doesn't properly take that into consideration, better paraphrased sentences were lost to reverting to the previous model checkpoint that had a better Bleu score. As an example:
