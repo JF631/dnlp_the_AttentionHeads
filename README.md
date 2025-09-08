@@ -111,7 +111,10 @@ For Paraphrase Type Detection:
 ```sh
 python bart_detection.py --use_gpu --seed 1171
 ```
-
+For Paraphrase Type Generation:
+```sh
+python bart_generation.py --use_gpu
+```
 #### Part 2: Improvements
 
 For QQP, run this command :
@@ -141,6 +144,15 @@ python multitask_classifierSTS.py \
   --epochs 10 \
   --use_gpu \
   --amp
+```
+
+For Paraphrase Type Generation:
+```sh
+python bart_generation.py --use_gpu
+```
+or to check partial results
+```sh
+python verify_outputBartGen.py --use_gpu
 ```
 ---
 ## Experiments
