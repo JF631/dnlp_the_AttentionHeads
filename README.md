@@ -424,7 +424,7 @@ Note: The crossed out imprvementes/versions have been discarded/reverted due to 
 |Implementing IBleu (not freezing layers) |41.74           |  30.15        |
 |Implementing warmup for lr |45.77           | 32.57          |
 |Testing warmup with torch.optim AdamW  |47.48      | 33.7     | (lr=1e-5, external AdamW for testing)
-|Implementing k_drop on top of warmup |46.79          |  33.15        |(lr=5e-5, k_droplambda = 0.5)
+|Implementing k_drop on top of warmup |46.79          |  33.15        |(lr=5e-5, k_droplambda = 1.0)
 |Implementing k_drop on top of warmup  |46.79          |  32.81 |     (lr=2e-5, k_droplambda = 0.5)
 
 ---
