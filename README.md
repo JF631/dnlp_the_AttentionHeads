@@ -493,9 +493,15 @@ Note: The crossed out imprvementes/versions have been discarded/reverted due to 
 
 ## Members Contribution
 ### Jakob Faust
-- Implement `attention` and the `forward` method in `bert.py` 
-- Implement the Paraphrase type detection task (worked on the `bart_detection.py` file)
+- Implement `attention` and the `forward` method in `bert.py`
+- Helped group members to set up gwdg cluster access with conda environment  
+- Implement the Paraphrase type detection task, only member working on the `bart_detection.py`
 - Worked on the `optimizer.py`
+- Implement and Reasearch for Paraphrase Type Detection Improvements, finally implemented following approaches:
+  - Implement a balanced sampler for considering rare types.
+  - Implement ASL for weighting rare types more during training.
+  - Implement supervised contrastive loss to cluster paraphrase types in embedding space.
+  - Implement small MLP as classifier head. 
 
 ### Lukas Nölke
 - Implement `embed` in `bert.py`
@@ -541,6 +547,7 @@ Note: The crossed out imprvementes/versions have been discarded/reverted due to 
 
 
 # AI-Usage Card
+[Ai-usage-card.pdf](https://github.com/user-attachments/files/22217961/Ai-usage-card.pdf)
 
 # References 
 ### Acknowledgement
