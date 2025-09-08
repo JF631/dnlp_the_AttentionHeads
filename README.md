@@ -191,25 +191,6 @@ R-Drop (α=4.0) | 0.890 | 0.854
 
 We found that a `alpha=2.0` yielded the best overall performance on top of the cross-encoder baseline.
 
-### Paraphrase type detection with BART.
-The main drawback we noticed is the already very high accuracy score of the baseline model (around 90%). When we look at how the accuracy is computed however, we see that it is just the overlap between the ground truth multi hot vector and the predicted vector.
-This means if the model "learns" to predict either always only zeroes or only the most frequent type in the training dataset the accuracy will be quite high even though the model is incapable of differentiating between 26 paraphrase types.
-The fact that the model learns to predict always the most frequent type arises beacuse the dataset used for training is unbalanced. E.g. we have several thousand examples of some paraphrase types on the one hand and only less than 10 examples of other types.
-
-We mainly focussed on overcomming this major problem by taking and trying out following approaches:
-
-- we started off with a MultiLabelBalancedBatchSampler which oversamples rare labels via inverse-frequency probabilities so that each batch includes more rare types.
-- Next, we combined this with an ASL (see Methodology) to focus even more on rare types.
-- As this didn't improve the overall performance significantly, we introduced Supervised Contrastive Learning  to make the model cluster common paraphrase types together in the embedding space to learn real relationships between paraphrase types. 
-- Additionally, we introduced a nonlinear classification head which requires only slightly more effort to train.
-
-- The results with the improvements mentioned above can be reproduced by running `python bart_detection.py --use_gpu --use_optim --seed 1171 --weight 0.03`  
-The experiments were run over 10 epochs.
-
-The overall improved outcome is quite well summarized in these pictures.
-
-As can be seen, the model now predicts rare types much better than before and improves its recognition performance on almost all paraphrase types (measured by the F1 score) on the dev set.
-
 ### Paraphrase Type Generation (PTG)
 
 PTG is a task that has two main objectives. Generate semantically similar sentences, but also ones that differ from the input. Our experiments resulted in two improvements that tackle those challenges. 
@@ -433,6 +414,9 @@ The overall improved outcome is quite well summarized in these pictures:
 
 
 As can be seen, the model now predicts rare types much better than before and improves its recognition performance on almost all paraphrase types (measured by the F1 score) on the dev set.
+
+The results with the improvements mentioned above can be reproduced by running ```python bart_detection.py --use_gpu --use_optim --seed 1171 --weight 0.03```  
+The experiments were run over 10 epochs.
 
 ## Results
 ### Improvements
